@@ -1,0 +1,20 @@
+<details class="dropdown relative">
+  <summary class="list-none cursor-pointer text-xs text-muted hover:text-heading border border-line rounded-[8px] px-3 py-1.5 inline-flex items-center gap-1">
+    Actions <span class="text-[10px]">&#9662;</span>
+  </summary>
+  <div class="absolute right-0 mt-2 w-60 rounded-card border border-line bg-surface shadow-lg p-2 z-20 text-sm">
+    <a href="/accounts/{{ account.id }}/audit" class="block px-3 py-2 rounded-[8px] text-ink hover:bg-surfaceblue">Audit / explain gains</a>
+    <form hx-post="/accounts/{{ account.id }}/prices/fetch" hx-target="#tx-table" hx-swap="outerHTML">
+      <button type="submit" class="w-full text-left px-3 py-2 rounded-[8px] text-ink hover:bg-surfaceblue">Fetch USD prices</button>
+    </form>
+    <form method="post" action="/accounts/{{ account.id }}/reconcile">
+      <button type="submit" class="w-full text-left px-3 py-2 rounded-[8px] text-ink hover:bg-surfaceblue"
+              title="Carry cost basis across your own cross-account self-transfers">Carry internal-transfer basis</button>
+    </form>
+    <div class="border-t border-line my-2"></div>
+    <form method="post" action="/accounts/{{ account.id }}/delete"
+          onsubmit="return confirm('Delete account {{ account.name }} and all its data?');">
+      <button type="submit" class="w-full text-left px-3 py-2 rounded-[8px] text-loss hover:bg-surfaceblue">Delete account</button>
+    </form>
+  </div>
+</details>

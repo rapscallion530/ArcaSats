@@ -1,0 +1,24 @@
+manifestVersion: 1
+id: bitcoin-tax-tracker
+category: finance
+name: Bitcoin Tax Tracker
+version: "0.1.0"
+tagline: Local-only Bitcoin tax & accounting
+description: >-
+  Track Bitcoin transactions by account — import xpubs and CSVs, connect read-only
+  exchange APIs, compute per-account FIFO cost basis, and generate US Form 8949 /
+  Schedule D. Runs on your own node: no cloud, no accounts; your coin data stays on the box
+  (the only outbound traffic is a public BTC/USD price feed you can disable).
+developer: ArcaSats
+website: https://github.com/arcasats/bitcoin-tax-tracker
+dependencies:
+  - electrs
+repo: https://github.com/arcasats/bitcoin-tax-tracker
+support: https://github.com/arcasats/bitcoin-tax-tracker/issues
+port: 8000
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+submitter: ArcaSats
+submission: https://github.com/arcasats/bitcoin-tax-tracker

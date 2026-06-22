@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Accounts &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+  <div class="flex items-baseline justify-between">
+    <h1 class="text-2xl text-heading">Accounts</h1>
+    <button hx-get="/partials/add-account-form" hx-target="#panel" hx-swap="innerHTML"
+            class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
+      + Add account
+    </button>
+  </div>
+
+  <div id="panel"></div>
+
+  {% include "partials/accounts_grid.html" %}
+</div>
+{% endblock %}

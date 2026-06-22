@@ -1,0 +1,11 @@
+<div id="node-status">
+  {% if result is not none %}
+  <div class="rounded-[8px] border px-4 py-3 text-sm {{ 'border-gain text-gain' if result.ok else 'border-loss text-loss' }}">
+    {% if result.ok %}
+      Connected{% if result.latency_ms is not none %} ({{ result.latency_ms }} ms){% endif %}{% if result.height %} · chain tip {{ '{:,}'.format(result.height) }}{% endif %}.
+    {% else %}
+      {{ result.message }}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Tax Forms &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+  <div>
+    <h1 class="text-2xl text-heading">Tax forms</h1>
+    <p class="text-muted text-sm mt-1">US Form 8949 &amp; Schedule D, generated per account with per-account FIFO.</p>
+  </div>
+
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for s in summaries %}
+    <div class="card bg-surface border border-line rounded-card p-5">
+      <h3 class="text-lg text-heading">{{ s.account.name }}</h3>
+      <p class="text-muted text-sm mt-1">{{ s.tx_count }} transactions</p>
+      <div class="mt-4 flex gap-2">
+        <a href="/tax/{{ s.account.id }}/8949" class="text-sm px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink hover:bg-btnbghover">View 8949</a>
+        <a href="/tax/{{ s.account.id }}/8949.csv" class="text-sm px-3 py-1.5 rounded-[8px] bg-surface border border-line text-heading hover:border-muted">CSV</a>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No accounts yet. Create one to generate tax forms.</p>
+    {% endfor %}
+  </div>
+
+  <p class="text-xs text-muted">Not tax advice. Verify against current IRS guidance before filing.</p>
+</div>
+{% endblock %}

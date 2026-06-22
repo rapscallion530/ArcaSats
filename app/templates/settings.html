@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Settings · ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[760px] mx-auto px-5 py-10 space-y-6">
+  <div>
+    <h1 class="text-2xl text-heading">Settings</h1>
+    <p class="text-muted text-sm mt-1">Connect to your Bitcoin node's Electrum server (electrs/Fulcrum) for xpub sync.</p>
+  </div>
+
+  {% if saved %}
+  <div class="rounded-[8px] border border-gain text-gain px-4 py-3 text-sm">Settings saved.</div>
+  {% endif %}
+
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <h2 class="text-xl text-heading mb-1">Node connection</h2>
+    <p class="text-muted text-sm mb-5">
+      Point at any Electrum server — your own node over LAN, or its <strong>.onion over Tor</strong>
+      (recommended; like Sparrow). <code>.onion</code> hosts use Tor automatically.
+    </p>
+
+    <form method="post" action="/settings" class="space-y-5">
+      <div class="grid sm:grid-cols-3 gap-4">
+        <label class="text-sm sm:col-span-2">
+          <span class="text-muted">Server address</span>
+          <input name="electrum_host" value="{{ cfg.electrum_host }}" autocomplete="off"
+                 placeholder="abcd…xyz.onion  or  192.168.1.50"
+                 class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
+        </label>
+        <label class="text-sm">
+          <span class="text-muted">Port</span>
+          <input name="electrum_port" type="number" value="{{ cfg.electrum_port }}"
+                 class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        </label>
+      </div>
+
+      <div class="flex flex-wrap gap-6">
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" name="use_tor" value="on" {% if cfg.use_tor %}checked{% endif %}>
+          <span class="text-ink">Connect via Tor</span>
+          <span class="text-muted text-xs">(auto for .onion)</span>
+        </label>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" name="use_ssl" value="on" {% if cfg.use_ssl %}checked{% endif %}>
+          <span class="text-ink">Use SSL/TLS</span>
+          <span class="text-muted text-xs">(ignored over Tor)</span>
+        </label>
+      </div>
+
+      <details class="text-sm">
+        <summary class="text-muted cursor-pointer">Advanced — Tor SOCKS proxy</summary>
+        <div class="grid sm:grid-cols-2 gap-4 mt-3">
+          <label>
+            <span class="text-muted">SOCKS host</span>
+            <input name="tor_host" value="{{ cfg.tor_host }}"
+                   class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+          </label>
+          <label>
+            <span class="text-muted">SOCKS port</span>
+            <input name="tor_port" type="number" value="{{ cfg.tor_port }}"
+                   class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+            <span class="text-muted text-xs">Tor Browser = 9150 · tor service = 9050</span>
+          </label>
+        </div>
+      </details>
+
+      <label class="text-sm block">
+        <span class="text-muted">USD price source</span>
+        <select name="price_source" class="mt-1 w-full sm:w-80 rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+          <option value="coinbase" {% if cfg.price_source == 'coinbase' %}selected{% endif %}>Coinbase (public, 15-min candles)</option>
+          <option value="bitstamp" {% if cfg.price_source == 'bitstamp' %}selected{% endif %}>Bitstamp (public, 15-min candles)</option>
+          <option value="mempool" {% if cfg.price_source == 'mempool' %}selected{% endif %}>My own mempool node (local, no third party)</option>
+        </select>
+        <span class="text-muted text-xs">Where historical USD prices come from. Public sources fetch the 15-minute candle close at each transaction's time, in weekly batches. "My own mempool" uses your node's historical-price API (needs the URL below and price indexing enabled). All prices are spot estimates — enter your actual price paid where you know it; it always takes precedence.</span>
+      </label>
+
+      <label class="text-sm block">
+        <span class="text-muted">Block explorer URL (optional)</span>
+        <input name="mempool_url" value="{{ cfg.mempool_url }}" autocomplete="off"
+               placeholder="http://your-mempool.local:3006  or  https://abcd…xyz.onion"
+               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
+        <span class="text-muted text-xs">A mempool.space-compatible explorer (your node's mempool on StartOS/Umbrel, a LAN instance, or a .onion). Adds a private "explorer ↗" link on each on-chain transaction. Your browser navigates there directly — ArcaSats sends nothing.</span>
+      </label>
+
+      <div class="flex items-center gap-3">
+        <button type="submit"
+                class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
+          Save
+        </button>
+        <button type="button"
+                hx-post="/settings/test" hx-include="closest form" hx-target="#node-status" hx-swap="innerHTML"
+                class="px-4 py-2 rounded-[8px] bg-surface border border-line text-heading text-sm font-medium hover:border-muted">
+          Test connection
+        </button>
+        <span class="htmx-indicator text-sm text-muted">testing… (Tor can take ~10s)</span>
+      </div>
+    </form>
+
+    <div class="mt-4">{% include "partials/node_status.html" %}</div>
+  </section>
+
+  <!-- Local AI (optional) -->
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <h2 class="text-xl text-heading mb-1">Local AI assistant</h2>
+    <p class="text-muted text-sm mb-5">
+      Connect your own <strong>local</strong> model (e.g. <a href="https://ollama.com" target="_blank" rel="noopener" class="underline hover:text-heading">Ollama</a>
+      running Qwen, Dolphin, etc., or any OpenAI-compatible server like LM Studio) to power the read-only
+      <a href="/assistant" class="underline hover:text-heading">Ask your data</a> assistant. Optional and off until you add a connection.
+      Your data is only sent to endpoints you configure — keep <em>Allow non-local endpoint</em> off to ensure it never leaves this machine.
+    </p>
+    {% include "partials/llm_connections.html" %}
+  </section>
+
+  <!-- Outbound Data Log -->
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap">
+      <h2 class="text-xl text-heading">Outbound data log</h2>
+      {% if outbound %}
+      <form method="post" action="/settings/outbound/clear">
+        <button class="text-xs text-muted hover:text-loss border border-line rounded-[6px] px-2 py-1">Clear log</button>
+      </form>
+      {% endif %}
+    </div>
+    <p class="text-muted text-sm mt-1 mb-3">Every intentional network action this app makes is recorded here — only
+      <strong>host + purpose</strong>, never addresses, xpubs, txids, amounts, or any coin/personal data.</p>
+    {% if outbound %}
+    <div class="overflow-x-auto border border-line rounded-[8px]">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-3 py-2 font-medium">When (UTC)</th><th class="px-3 py-2 font-medium">Host</th>
+          <th class="px-3 py-2 font-medium">Purpose</th><th class="px-3 py-2 font-medium">Detail</th>
+        </tr></thead>
+        <tbody>
+          {% for e in outbound %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-3 py-2 whitespace-nowrap">{{ e.timestamp.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="px-3 py-2 font-mono text-xs break-all">{{ e.host }}</td>
+            <td class="px-3 py-2">{{ e.purpose }}</td>
+            <td class="px-3 py-2 text-muted">{{ e.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-muted">No outbound network actions recorded yet.</p>
+    {% endif %}
+  </section>
+
+  <!-- Data at rest -->
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <h2 class="text-xl text-heading mb-1">Data at rest</h2>
+    <p class="text-muted text-sm">Your data lives only in <code>data/btt.sqlite</code> on this machine. For
+      encryption at rest, use OS <strong>full-disk / encrypted-volume</strong> encryption (BitLocker, LUKS, VeraCrypt) —
+      the most robust option for a local app and the recommended approach. (A built-in SQLCipher option may be added later;
+      it needs a native library that isn't available on all platforms.)</p>
+  </section>
+</div>
+{% endblock %}

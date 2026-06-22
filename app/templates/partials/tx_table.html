@@ -1,0 +1,142 @@
+<div id="tx-table"{% if tx_oob %} hx-swap-oob="true"{% endif %}>
+  {% if import_result is defined %}
+  <div class="mb-4 rounded-card border px-4 py-3 text-sm
+              {% if import_result.errors %}border-loss text-loss
+              {% elif import_result.rejected %}border-warn text-warn bg-warn/10
+              {% else %}border-line text-heading bg-surfaceblue{% endif %}">
+    {% if import_result.errors %}
+      Import failed ({{ import_source }}): {{ import_result.errors|join('; ') }}
+    {% else %}
+      Imported <strong>{{ import_result.imported }}</strong> from {{ import_source }},
+      skipped {{ import_result.skipped }} duplicate(s).
+      {% if import_result.rejected %}
+      <div class="mt-2">
+        <div class="font-medium">{{ import_result.rejected|length }} row issue(s) — these were NOT imported:</div>
+        <ul class="list-disc list-inside mt-1 space-y-0.5">
+          {% for r in import_result.rejected %}<li>{{ r }}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% set pr = price_result|default(none) %}
+  {% if pr is not none %}
+  <div class="mb-4 rounded-card border border-line bg-surfaceblue px-4 py-3 text-sm text-heading">
+    Set USD prices on <strong>{{ pr.updated }}</strong> transaction(s).
+    {% if pr.missing %}{{ pr.missing }} had no price available. {% endif %}{{ pr.note }}
+  </div>
+  {% endif %}
+
+  <div class="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+    <h2 class="text-xl text-heading">Transactions <span class="text-muted text-sm">({{ txs|length }})</span></h2>
+    <span class="text-sm text-muted">Balance: <span class="text-heading font-medium">{{ summary.balance_sats|btcamt }} <span class="unit">BTC</span></span></span>
+  </div>
+
+  {% if txs %}
+  {% set editing = editing_tx_id|default(None) %}
+  <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium">Date</th>
+          <th class="px-4 py-3 font-medium">Type</th>
+          <th class="px-4 py-3 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-4 py-3 font-medium text-right">USD value</th>
+          <th class="px-4 py-3 font-medium">Counterparty</th>
+          <th class="px-4 py-3 font-medium"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in txs %}
+        {% if editing == t.id %}
+        <tr class="border-b border-line/60 bg-surfaceblue/40">
+          <td colspan="6" class="px-4 py-3">
+            <form class="grid sm:grid-cols-6 gap-2 items-end"
+                  hx-post="/accounts/{{ account.id }}/transactions/{{ t.id }}/edit" hx-target="#tx-table" hx-swap="outerHTML">
+              <label class="text-xs">
+                <span class="text-muted">Date</span>
+                <input name="timestamp" type="date" value="{{ t.timestamp.strftime('%Y-%m-%d') }}"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs">
+                <span class="text-muted">Type</span>
+                <select name="kind" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+                  {% for k in kinds %}<option value="{{ k }}" {% if k == t.kind %}selected{% endif %}>{{ labels.get(k, k) }}</option>{% endfor %}
+                </select>
+              </label>
+              <label class="text-xs">
+                <span class="text-muted">BTC</span>
+                <input name="amount_btc" value="{{ t.amount_sats|btc }}" inputmode="decimal"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs">
+                <span class="text-muted">USD value</span>
+                <input name="fiat_value" value="{{ t.fiat_value if t.fiat_value is not none else '' }}" inputmode="decimal"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-2">
+                <span class="text-muted">Counterparty</span>
+                <input name="counterparty" value="{{ t.counterparty }}"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <div class="sm:col-span-6 flex items-center gap-3">
+                <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Save</button>
+                <button type="button" class="text-sm text-muted hover:text-heading"
+                        hx-get="/accounts/{{ account.id }}/transactions" hx-target="#tx-table" hx-swap="outerHTML">Cancel</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr class="group border-b border-line/60 last:border-0">
+          <td class="px-4 py-3 whitespace-nowrap">{{ t.timestamp.strftime("%Y-%m-%d") }}</td>
+          <td class="px-4 py-3">
+            {% set color = "text-gain" if t.kind in ("buy","income","transfer_in") else "text-loss" %}
+            <span class="{{ color }}">{{ labels.get(t.kind, t.kind) if labels else t.kind }}</span>
+            {% if t.txid and internal_txids is defined and t.txid in internal_txids %}
+            <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-headingalt" title="self-transfer between your own wallets">internal</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-right tabular-nums">{{ t.amount_sats|btcamt }}</td>
+          <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ t.usd_value|usd }}{% if t.fiat_source in ('manual', 'actual') %}<span class="ml-1 text-[10px] text-gain" title="Your own / exchange-reported value (your actual price paid) — never changed by auto-pricing.">set</span>{% endif %}</td>
+          <td class="px-4 py-3 text-muted">{{ t.counterparty or "—" }}</td>
+          <td class="px-4 py-3 text-right whitespace-nowrap opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            {% set is_internal_in = t.kind == "transfer_in" and (t.carried_basis_usd is not none or (t.txid and internal_txids is defined and t.txid in internal_txids)) %}
+            {% if is_internal_in %}
+            <button class="text-xs {{ 'text-muted' if t.carry_disabled else 'text-gain' }} hover:text-heading"
+                    hx-post="/accounts/{{ account.id }}/transactions/{{ t.id }}/carry-toggle"
+                    hx-target="#tx-table" hx-swap="outerHTML"
+                    title="Toggle cost-basis carryover from the source wallet">
+              carry:{{ "off" if t.carry_disabled else "on" }}</button>
+            {% endif %}
+            {% if t.kind == "transfer_out" %}
+            <a class="text-muted hover:text-heading text-xs ml-2"
+               href="/accounts/{{ account.id }}/transactions/{{ t.id }}/gift-statement">gift&nbsp;stmt</a>
+            {% endif %}
+            {% if t.txid and mempool_url|default('') %}
+            <a class="text-muted hover:text-heading text-xs ml-2" target="_blank" rel="noopener"
+               href="{{ mempool_url }}/tx/{{ t.txid }}"
+               title="Inspect this transaction (fees, confirmations, in/outputs) on your own block explorer">explorer&nbsp;&#8599;</a>
+            {% endif %}
+            <button class="text-muted hover:text-heading text-xs ml-2"
+                    hx-get="/accounts/{{ account.id }}/transactions/{{ t.id }}/edit-form"
+                    hx-target="#tx-table" hx-swap="outerHTML">edit</button>
+            <button class="text-muted hover:text-loss text-xs ml-2"
+                    hx-post="/accounts/{{ account.id }}/transactions/{{ t.id }}/delete"
+                    hx-target="#tx-table" hx-swap="outerHTML"
+                    hx-confirm="Delete this transaction?">delete</button>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card bg-surface border border-dashed border-line rounded-card p-8 text-center text-muted">
+    No transactions yet. Add one above, or import via CSV / xpub.
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,4 @@
+# Dev/test dependencies (CI + local). Includes runtime deps plus the test stack.
+-r requirements.txt
+pytest==9.1.0
+httpx==0.28.1

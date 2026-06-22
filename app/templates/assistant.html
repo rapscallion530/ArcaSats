@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Assistant · ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[860px] mx-auto px-5 py-10 space-y-6">
+  <div>
+    <h1 class="text-2xl text-heading">Ask your data</h1>
+    <p class="text-muted text-sm mt-1">Ask plain-English questions about your holdings, gains, fees, and gifts.
+      Answered by <strong>your own local model</strong> from a read-only snapshot computed by ArcaSats —
+      figures come from the app's math, the model just interprets them. The only network hop is to your
+      local model endpoint (shown in the Outbound Data Log).</p>
+  </div>
+
+  {% if not default %}
+  <div class="rounded-[8px] border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
+    No local model is connected yet. <a href="/settings" class="underline hover:text-heading">Add one in Settings &rarr; Local AI</a>.
+  </div>
+  {% endif %}
+
+  <form hx-post="/assistant/ask" hx-target="#answer" hx-swap="innerHTML"
+        class="card bg-surface border border-line rounded-card p-5 space-y-3">
+    {% if conns|length > 1 %}
+    <label class="text-sm block">
+      <span class="text-muted">Model</span>
+      <select name="conn_id" class="mt-1 w-full sm:w-72 rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        {% for c in conns %}<option value="{{ c.id }}" {% if c.is_default %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <textarea name="question" rows="3" id="q"
+              placeholder="e.g. What were my total short-term gains in 2024? How much BTC do I hold and at what cost basis?"
+              class="w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent"></textarea>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover"
+              {% if not default %}disabled{% endif %}>Ask</button>
+      <span class="htmx-indicator text-sm text-muted">thinking… (local models can take a few seconds)</span>
+    </div>
+    <div class="flex flex-wrap gap-2 pt-1">
+      {% set examples = [
+        "How much BTC do I hold, and at what total cost basis?",
+        "What were my total short-term and long-term gains in 2024?",
+        "Which account has the largest unrealized position?",
+        "Do I have any data-quality issues to fix before filing?",
+      ] %}
+      {% for ex in examples %}
+      <button type="button" onclick="document.getElementById('q').value=this.textContent.trim();"
+              class="text-xs text-muted hover:text-heading border border-line rounded-full px-3 py-1">{{ ex }}</button>
+      {% endfor %}
+    </div>
+  </form>
+
+  <div id="answer"></div>
+
+  <p class="text-xs text-muted">The assistant is read-only — it can't change your data. Verify figures against your
+    records; this is not tax advice.</p>
+</div>
+{% endblock %}

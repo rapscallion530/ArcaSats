@@ -1,0 +1,4 @@
+date,type,amount_btc,usd_value,fee_btc,txid,external_id,counterparty,note
+2025-05-01,buy,0.00100000,90.00,0,,gen-1,Manual,test buy
+2025-05-02,sell,0.00050000,48.00,0,,gen-2,Manual,test sell
+2025-05-03,transfer_in,0.00200000,,0.00001,abc,gen-3,Self,from cold

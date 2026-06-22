@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}About &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<style>
+  details.faq { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  details.faq + details.faq { margin-top: 0.6rem; }
+  details.faq > summary { cursor: pointer; list-style: none; padding: 0.9rem 1rem; font-weight: 600; color: var(--heading); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  details.faq > summary::-webkit-details-marker { display: none; }
+  details.faq > summary::after { content: "+"; color: var(--accent); font-size: 1.25rem; line-height: 1; }
+  details.faq[open] > summary::after { content: "\2212"; }  /* minus */
+  details.faq > div { padding: 0 1rem 1rem; color: var(--ink); }
+</style>
+
+<!-- Hero -->
+<section class="hero-gradient border-b border-line">
+  <div class="max-w-[860px] mx-auto px-5 py-14 text-center">
+    <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-accent text-white text-2xl font-bold">&#8383;</div>
+    <h1 class="text-4xl text-heading mt-4">ArcaSats</h1>
+    <p class="text-accent font-medium mt-2 text-lg">{{ TAGLINE }}</p>
+    <p class="text-muted mt-4 max-w-xl mx-auto">A local-only Bitcoin tax &amp; accounting tool. Track your sats across every
+      exchange and wallet, compute cost basis, and produce US tax forms — entirely on your own machine, against your own node.</p>
+    <div class="mt-6 flex justify-center gap-3">
+      <a href="/" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Open dashboard</a>
+      <a href="{{ SUPPORT_URL or '#' }}" {% if SUPPORT_URL %}target="_blank" rel="noopener"{% endif %}
+         class="px-4 py-2 rounded-[8px] bg-surface border border-line text-heading text-sm font-medium hover:border-muted">Support the project</a>
+    </div>
+    <p class="text-sm text-muted mt-5">Project supported by the generosity of
+      <a href="https://dirigobtc.org" target="_blank" rel="noopener" class="text-accent hover:text-heading underline">DirigoBTC</a>.</p>
+  </div>
+</section>
+
+<div class="max-w-[860px] mx-auto px-5 py-10 space-y-10">
+
+  <!-- Features -->
+  <section>
+    <h2 class="text-2xl text-heading mb-4">What it does</h2>
+    <div class="grid sm:grid-cols-2 gap-4">
+      {% set features = [
+        ("Local &amp; private", "Everything lives in a SQLite file on your computer. No coin or personal data ever leaves the machine; an Outbound Data Log shows exactly what does."),
+        ("Your node, over Tor", "Connects to your own electrs/Fulcrum node — preferably via its .onion over Tor — or a public Electrum server. Watch-only: never needs your private keys."),
+        ("Every source", "Import single-sig xpub/zpub watch-only wallets, multisig output descriptors (Unchained / Sparrow), CSV exports (Coinbase, Strike, Swan, Bisq, or generic), and manual entries for anything else."),
+        ("Accounts &amp; owners", "Segregate coins by account (KYC / non-KYC / per-person) and owner, with per-account cost-basis tracking per the 2025 wallet-level rules."),
+        ("Cost basis done right", "FIFO / LIFO / HIFO per account. Self-transfers carry basis (even exchange&rarr;wallet); transfers to other people are treated as gifts."),
+        ("Accurate, time-of-day pricing", "Values each transaction at the BTC/USD price for the hour it actually happened &mdash; not a blunt daily average &mdash; from public market data. Your real exchange amounts and any value you enter are always kept as-is."),
+        ("US tax forms", "Form 8949 + Schedule D per year with CSV export, a printable gift cost-basis statement, and an audit view that explains every gain."),
+        ("Honest on-chain classification", "xpub activity is classified by what's actually visible: change is netted automatically, receives/sends with an outside party become buys/sells, and moves between two of your own loaded wallets are detected as non-taxable transfers."),
+        ("Inspect on your own explorer", "Open any on-chain transaction in your node's own mempool/block explorer (StartOS, Umbrel, LAN, or .onion) to review the txid, fees, and confirmations &mdash; privately, with no third-party explorer."),
+        ("Made for stackers", "Built for daily DCA plus the occasional sell, gift, or transfer &mdash; comfortably handling years of history (hundreds of transactions a year) on modest hardware."),
+      ] %}
+      {% for title, body in features %}
+      <div class="card bg-surface border border-line rounded-card p-5">
+        <h3 class="text-heading font-medium">{{ title|safe }}</h3>
+        <p class="text-muted text-sm mt-1">{{ body|safe }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section>
+    <h2 class="text-2xl text-heading mb-4">Frequently asked questions</h2>
+    {% set faqs = [
+      ("What is ArcaSats?",
+       "ArcaSats is a local-first Bitcoin tax and accounting application. It tracks the movement of your bitcoin across exchanges and wallets &mdash; from your first sat to today &mdash; computes cost basis, and generates US tax forms. It runs entirely on your computer."),
+      ("Is my data private? Where is it stored?",
+       "Yes. All of your data is stored in a local database (<code>data/btt.sqlite</code>) on your machine. ArcaSats never transmits addresses, xpubs, transaction IDs, balances, or any personal data. The only outbound traffic is generic public data (historical BTC/USD prices) and queries to your own node &mdash; and every such action is recorded in the Outbound Data Log on the Settings page."),
+      ("How does it connect to the blockchain?",
+       "Through an Electrum server (electrs or Fulcrum). The recommended setup is your own node reached over Tor via its <code>.onion</code> address &mdash; private and sovereign. You can also point it at a public Electrum server (with a privacy warning) or a LAN node. Configure this under Settings &rarr; Node."),
+      ("Do I have to give it my private keys or seed?",
+       "Never. ArcaSats is strictly watch-only. You provide an extended <em>public</em> key (xpub/ypub/zpub) or addresses. It can read your transaction history but can never move funds."),
+      ("Which wallets and exchanges are supported?",
+       "Watch-only xpub/zpub wallets (any address type &mdash; it auto-detects), CSV exports from Coinbase, Strike, Swan, and Bisq (plus a generic format), and manual entry for OTC trades, mining, old wallets, or lost exchanges. (Direct exchange-API sync was removed in favor of CSV &mdash; it keeps your keys and traffic off third-party APIs.)"),
+      ("How does ArcaSats classify my on-chain (xpub) transactions?",
+       "It derives both your <em>receive</em> and <em>change</em> addresses from the xpub (like Sparrow's address panel), so change returning to you is netted out automatically &mdash; it's not counted as a separate receive. A receive from an outside party is treated as a <strong>buy</strong> and a send to an outside party as a <strong>sell</strong> (you supply the price via the price feed or by editing); a move between two of your own <em>loaded</em> wallets is detected as a non-taxable <strong>transfer</strong>. If a wallet's coins actually come from an exchange whose CSV you import, set it to &ldquo;self-custody fed by an exchange&rdquo; so those moves stay transfers (basis from the CSV, no double-counting). You can reclassify any transaction by editing it."),
+      ("Can I add a multisig wallet (Unchained / Sparrow)?",
+       "Yes — paste the wallet's <strong>output descriptor</strong> (e.g. <code>wsh(sortedmulti(2,[…]xpub1/&lt;0;1&gt;/*,…))</code>) into the wallet's key field instead of a single xpub. A multisig address is built from <em>all</em> the cosigner keys, so one xpub alone can never reproduce it; the descriptor carries the whole quorum. ArcaSats derives each cosigner's child pubkey per index, BIP67-sorts them, builds the m-of-n script, and scans the resulting P2WSH/P2SH addresses over your node like any other wallet."),
+      ("My wallet's transactions aren't showing up — what address type does it use?",
+       "ArcaSats auto-detects the address encoding from on-chain history. If a wallet is brand-new (no history yet) or you just want to be explicit, set the <strong>Address type</strong> on the wallet form (Native SegWit / Nested SegWit / Legacy) instead of Auto. For multisig, use the output descriptor (above) rather than an xpub."),
+      ("Can I inspect a transaction's fees and details on a block explorer?",
+       "Yes, privately. Set your explorer's URL in <strong>Settings &rarr; Node</strong> &mdash; your node's mempool on StartOS/Umbrel, a LAN instance, or a <code>.onion</code>. Each on-chain transaction then shows an <strong>explorer &#8599;</strong> link that opens it in <em>your own</em> explorer to review the txid, fees, confirmations, and inputs/outputs. Your browser navigates there directly, so ArcaSats itself sends nothing."),
+      ("Does it support altcoins, or only Bitcoin?",
+       "Bitcoin only &mdash; by design. ArcaSats is a focused, sovereign tool for your sats, not a multi-coin portfolio tracker."),
+      ("What about Lightning transactions?",
+       "ArcaSats reads on-chain history (via your xpub) and exchange records. Lightning activity that never settles on-chain isn't pulled automatically &mdash; but you can record any of it (channel opens/closes, submarine swaps, LN buys or sells) as a manual entry so your cost basis and totals stay complete."),
+      ("What cost-basis methods are available?",
+       "FIFO, LIFO, and HIFO, selectable per account. FIFO is the default &mdash; it is also the IRS default when you have not specifically identified lots."),
+      ("How does ArcaSats determine the USD value of a transaction?",
+       "You choose the <strong>price source</strong> in Settings → Node: <strong>Coinbase</strong> or <strong>Bitstamp</strong> (public exchange data), or <strong>your own mempool node</strong> (fully local, no third party). For a public source, ArcaSats uses the <strong>close of the 15-minute candle</strong> covering each transaction's time, fetched in fixed <em>weekly</em> batches (a request reveals only the week of activity, not your exact transaction times). The displayed USD figure is this <strong>spot estimate</strong>. Important: this is a market price, not necessarily what you paid &mdash; many people pay a <em>premium or spread</em> over spot, so <strong>you're encouraged to enter your actual price paid</strong>; an exchange CSV value or a value you type always takes precedence and is never overwritten. (We don't clutter each row with an &lsquo;estimate&rsquo; tag &mdash; that's what this explanation is for; a small <strong>set</strong> tag marks values you've entered yourself.)"),
+      ("Can I set my actual price paid instead of the spot estimate?",
+       "Yes &mdash; and you should where you know it. Edit any transaction and type the USD amount you actually paid or received (including any premium/spread/fees). ArcaSats marks it as yours (a <strong>set</strong> tag) and never overwrites it when re-fetching prices. Clearing the value lets the chosen price source estimate it again."),
+      ("What changed for crypto taxes in 2025?",
+       "IRS Rev. Proc. 2024-28 ended &ldquo;universal&rdquo; cost-basis pooling. Starting January 1, 2025, basis must be tracked per wallet/account. ArcaSats tracks per account to match, and includes an &ldquo;Opening balance&rdquo; entry to record your pre-2025 starting basis."),
+      ("Is moving bitcoin between my own wallets taxable?",
+       "No. Transferring your own coins between wallets you control &mdash; including from an exchange to self-custody &mdash; is not a taxable sale, and your cost basis carries with the coins. You must keep records proving the transfer; ArcaSats does this and can carry the basis automatically (it matches transfers by transaction ID, or by amount + date for exchange withdrawals)."),
+      ("How does gifting bitcoin work?",
+       "Gifting is not a taxable sale for you. The recipient generally inherits your cost basis (carryover) and holding period; if the coin is worth less than your basis at the time of the gift, a dual-basis rule applies. ArcaSats generates a printable Gift Cost-Basis Statement for the recipient and flags when you may need to file Form 709 (gifts above the annual exclusion &mdash; $19,000 per recipient in 2026)."),
+      ("If I send coins to someone else, do they use my cost basis?",
+       "Only if they are the same owner (your own wallets). A gift to a different person means they receive a carryover basis via the gift statement &mdash; it is not your basis to keep, and ArcaSats will not merge your books with theirs. Set the recipient account's Owner field so transfers to them are treated as gifts, not self-transfers."),
+      ("What tax forms can it produce?",
+       "Form 8949 and Schedule D, per account and per tax year, with CSV export; a per-account income summary; a gift cost-basis statement; and an Audit / &ldquo;explain this gain&rdquo; view that traces every disposal back to the lots it consumed."),
+      ("Does it handle coin control, CoinJoin, or UTXO-level lots?",
+       "ArcaSats tracks at the account level (net movements plus documented transfers), which matches the IRS per-account rule and covers typical DCA and self-custody use. Full per-UTXO lot tracking &mdash; for coin-control or CoinJoin power users &mdash; is a planned future option, not yet built."),
+      ("Will it file my taxes or replace my accountant?",
+       "No. ArcaSats produces the forms and a complete audit trail for you to review, hand to a CPA, or transcribe into tax software. It is a record-keeping and calculation tool, not tax advice &mdash; verify everything against current IRS guidance before filing."),
+      ("Does it run on Linux and work offline?",
+       "Yes. It is a local Python web app that runs on Linux and Windows and is designed to be packaged for StartOS. Outbound network access is opt-in and limited to generic price data and your own node; with prices cached, it can run offline."),
+      ("How do I back up my data?",
+       "Copy the single database file (<code>data/btt.sqlite</code>). For encryption at rest, use OS full-disk or encrypted-volume encryption (BitLocker, LUKS, VeraCrypt)."),
+      ("Can my family use it without seeing each other's coins?",
+       "Yes. Create an admin account, then add per-person logins (&ldquo;uncle for the family&rdquo;). Each member sees only their own accounts; the admin sees all. Different owners never share cost basis."),
+      ("How can I support ArcaSats?",
+       "Donations are welcome via our <a href='" ~ SUPPORT_URL ~ "' target='_blank' rel='noopener' class='text-accent hover:text-heading underline'>BTCPay donation page</a> (hosted by DirigoBTC), or just hit the <strong>Support</strong> button in the menu. ArcaSats is free and MIT-licensed; donations keep it maintained and independent."),
+    ] %}
+    {% for q, a in faqs %}
+    <details class="faq">
+      <summary>{{ q }}</summary>
+      <div class="text-sm">{{ a|safe }}</div>
+    </details>
+    {% endfor %}
+  </section>
+
+  <p class="text-xs text-muted">Not tax advice. ArcaSats helps you organize records and compute figures; verify against current IRS guidance and consult a professional before filing.</p>
+</div>
+{% endblock %}

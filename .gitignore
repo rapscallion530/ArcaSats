@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.env
+secrets.*
+env.local.ps1
+
+# Local data — NEVER commit real financial data
+data/
+*.sqlite
+*.sqlite3
+*.db
+fixtures/real/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+# NOTE: app/static/tailwind.css is intentionally COMMITTED — local runs default to vendored
+# assets (BTT_ASSETS=local) and have no Node/Tailwind build step, so the compiled CSS must be
+# present on a fresh clone. The Docker packaging stage rebuilds it from input.css.
+node_modules/

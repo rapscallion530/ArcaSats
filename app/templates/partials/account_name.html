@@ -1,0 +1,10 @@
+<div id="acct-name">
+  <h1 class="text-2xl text-heading mt-1 flex items-center gap-2 flex-wrap">
+    {{ account.name }}
+    {% if account.label_kind %}<span class="text-sm px-2 py-0.5 rounded-full bg-surfaceblue text-headingalt">{{ account.label_kind }}</span>{% endif %}
+    {% if account.owner %}<span class="text-sm px-2 py-0.5 rounded-full bg-tagbg text-tagink" title="owner / holder">owner: {{ account.owner }}</span>{% endif %}
+    <button class="text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-0.5"
+            hx-get="/accounts/{{ account.id }}/edit-form" hx-target="#acct-name" hx-swap="outerHTML">edit</button>
+  </h1>
+  {% if account.note %}<p class="text-muted text-sm mt-1">{{ account.note }}</p>{% endif %}
+</div>

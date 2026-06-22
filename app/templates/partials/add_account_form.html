@@ -1,0 +1,38 @@
+<div class="card bg-surface border border-line rounded-card p-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl text-heading">New account</h2>
+    <button class="text-muted hover:text-heading text-sm"
+            onclick="this.closest('#panel').innerHTML=''">&times; close</button>
+  </div>
+  <p class="text-muted text-sm mt-1">Group coins by owner or KYC status. You can add wallets &amp; transactions inside.</p>
+  <form class="mt-4 grid sm:grid-cols-2 gap-4"
+        hx-post="/accounts" hx-target="#accounts-grid" hx-swap="outerHTML"
+        hx-on::after-request="this.closest('#panel').innerHTML=''">
+    <label class="text-sm">
+      <span class="text-muted">Account name</span>
+      <input name="name" type="text" required placeholder="e.g. Personal (KYC)"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm">
+      <span class="text-muted">Label (optional)</span>
+      <input name="label_kind" type="text" placeholder="KYC / non-KYC"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm">
+      <span class="text-muted">Owner / holder</span>
+      <input name="owner" type="text" placeholder="blank = you; or a family member"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">Note (optional)</span>
+      <input name="note" type="text"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <div class="sm:col-span-2">
+      <button type="submit"
+              class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
+        Create account
+      </button>
+    </div>
+  </form>
+</div>

@@ -1,0 +1,4 @@
+Time (UTC),Transaction Type,Amount BTC,Amount USD,BTC Price,Fee,Reference
+2025-01-20 08:00:00,Purchase,0.00500000,450.00,90000.00,0.00,strike-001
+2025-02-01 08:00:00,Withdrawal,0.00200000,,,0.00,strike-002
+2025-02-20 08:00:00,Purchase,0.00300000,279.00,93000.00,0.00,strike-003

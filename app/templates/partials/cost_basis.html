@@ -1,0 +1,61 @@
+<section id="cost-basis"{% if cb_oob %} hx-swap-oob="true"{% endif %} class="card bg-surface border border-line rounded-card p-6">
+  <div class="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
+    <h2 class="text-xl text-heading">Cost basis</h2>
+    <span class="text-xs text-muted">per-account {{ account.lot_method|upper }} &middot; Rev. Proc. 2024-28 &middot; <a href="/accounts/{{ account.id }}/audit" class="underline hover:text-heading">audit</a></span>
+  </div>
+
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-muted">Holdings</div>
+      <div class="text-lg font-display text-heading mt-1">{{ cb.holding_sats|btcamt }} <span class="unit">BTC</span></div>
+      <div class="text-sm text-muted">basis {{ cb.holding_basis_usd|usd }}{% if cb.holding_sats %} &middot; {{ cb.avg_cost_per_unit_usd|usd }}/BTC{% endif %}</div>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-muted">Realized (short)</div>
+      <div class="text-lg font-display mt-1 {{ 'text-gain' if cb.realized_short_usd >= 0 else 'text-loss' }}">{{ cb.realized_short_usd|susd }}</div>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-muted">Realized (long)</div>
+      <div class="text-lg font-display mt-1 {{ 'text-gain' if cb.realized_long_usd >= 0 else 'text-loss' }}">{{ cb.realized_long_usd|susd }}</div>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-muted">Income (ordinary)</div>
+      <div class="text-lg font-display text-heading mt-1">{{ cb.income_usd|usd }}</div>
+    </div>
+  </div>
+
+  {% if per_wallet and per_wallet|length > 1 %}
+  <div class="mt-6">
+    <h3 class="text-sm text-muted mb-2">Per wallet</h3>
+    <div class="overflow-x-auto border border-line rounded-[8px]">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-3 py-2 font-medium">Wallet</th>
+          <th class="px-3 py-2 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-3 py-2 font-medium text-right">Cost basis</th>
+          <th class="px-3 py-2 font-medium text-right">Realized</th>
+        </tr></thead>
+        <tbody>
+          {% for label, w in per_wallet %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-3 py-2">{{ label }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ w.holding_sats|btcamt }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ w.holding_basis_usd|usd }}</td>
+            <td class="px-3 py-2 text-right tabular-nums {{ 'text-gain' if w.realized_total_usd >= 0 else 'text-loss' }}">{{ w.realized_total_usd|susd }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if cb.warnings %}
+  <div class="mt-4 rounded-[8px] border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
+    <div class="font-medium mb-1">Review needed</div>
+    <ul class="list-disc list-inside space-y-1">
+      {% for w in cb.warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</section>

@@ -1,0 +1,26 @@
+<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+  <span class="flex items-center gap-2">
+    <span class="w-2.5 h-2.5 rounded-full {{ 'bg-gain' if result.ok else ('bg-warn' if not configured else 'bg-loss') }}"></span>
+    <span class="text-heading font-medium">
+      {% if result.ok %}Node connected{% elif not configured %}No node configured{% else %}Node offline{% endif %}
+    </span>
+  </span>
+
+  {% if result.ok %}
+  <span class="text-sm text-muted">Block <span class="text-heading tabular-nums">{{ "{:,}".format(result.height) }}</span></span>
+  <span class="text-sm text-muted">{{ result.latency_ms }} ms{% if via_tor %} · via Tor{% endif %}</span>
+  {% elif not configured %}
+  <a href="/settings" class="text-sm text-accent underline">Set up in Settings &rarr; Node</a>
+  {% else %}
+  <span class="text-sm text-loss truncate max-w-md">{{ result.message }}</span>
+  {% endif %}
+
+  <span class="hidden sm:inline text-muted">·</span>
+  <span class="text-sm text-muted">{{ account_count }} accounts · {{ wallet_count }} wallets · {{ tx_count }} txns · {{ total_sats|btcamt }} <span class="unit">BTC</span></span>
+
+  <button class="ml-auto text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-1"
+          hx-get="/node/status" hx-target="#node-widget" hx-swap="innerHTML" hx-disabled-elt="this">
+    refresh
+  </button>
+  <span class="htmx-indicator text-xs text-muted">checking…</span>
+</div>

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Audit · {{ account.name }} · ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+  <div>
+    <a href="/accounts/{{ account.id }}" class="text-sm text-muted hover:text-heading">&larr; {{ account.name }}</a>
+    <h1 class="text-2xl text-heading mt-1">Audit &amp; explain</h1>
+    <p class="text-muted text-sm mt-1">Open lots, every realized disposal traced to its lot(s), and items needing attention — per-account {{ account.lot_method|upper }}.</p>
+  </div>
+
+  {% if cb.warnings %}
+  <section class="rounded-card border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
+    <div class="font-medium mb-1">Needs attention ({{ cb.warnings|length }})</div>
+    <ul class="list-disc list-inside space-y-1">{% for w in cb.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+
+  <!-- Open lots -->
+  <section>
+    <h2 class="text-xl text-heading mb-2">Open lots <span class="text-muted text-sm">({{ cb.open_lots|length }}) · {{ cb.holding_sats|btcamt }} <span class="unit">BTC</span> · basis {{ cb.holding_basis_usd|usd }}</span></h2>
+    <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium">Acquired</th><th class="px-4 py-3 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-4 py-3 font-medium text-right">Cost basis</th><th class="px-4 py-3 font-medium">Source</th>
+        </tr></thead>
+        <tbody>
+          {% for lot in cb.open_lots %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-4 py-3">{{ lot.acquired.strftime("%Y-%m-%d") }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">{{ lot.sats|btcamt }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">{{ lot.basis_usd|usd }}</td>
+            <td class="px-4 py-3 text-muted">{{ lot.source or "—" }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="px-4 py-6 text-center text-muted">No open lots.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Disposals (explain) -->
+  <section>
+    <h2 class="text-xl text-heading mb-2">Realized disposals <span class="text-muted text-sm">({{ cb.disposals|length }})</span></h2>
+    <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium">Sold</th><th class="px-4 py-3 font-medium">Type</th>
+          <th class="px-4 py-3 font-medium text-right"><span class="unit">BTC</span></th><th class="px-4 py-3 font-medium">Acquired</th>
+          <th class="px-4 py-3 font-medium">Term</th><th class="px-4 py-3 font-medium text-right">Proceeds</th>
+          <th class="px-4 py-3 font-medium text-right">Basis</th><th class="px-4 py-3 font-medium text-right">Gain/loss</th>
+        </tr></thead>
+        <tbody>
+          {% for d in cb.disposals %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-4 py-3">{{ d.date.strftime("%Y-%m-%d") }}</td>
+            <td class="px-4 py-3">{{ d.kind }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">{{ d.sats|btcamt }}</td>
+            <td class="px-4 py-3">{{ d.acquired.strftime("%Y-%m-%d") }}</td>
+            <td class="px-4 py-3">{{ d.term }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">{{ d.proceeds_usd|usd }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">{{ d.basis_usd|usd }}</td>
+            <td class="px-4 py-3 text-right tabular-nums {{ 'text-gain' if d.gain_usd >= 0 else 'text-loss' }}">{{ d.gain_usd|susd }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="px-4 py-6 text-center text-muted">No realized disposals.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

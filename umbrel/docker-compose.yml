@@ -1,0 +1,29 @@
+# Umbrel app wrapper. Submit alongside umbrel-app.yml to getumbrel/umbrel-apps.
+# Single container + the mandatory app_proxy. Connects to Umbrel's electrs for xpub sync.
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: bitcoin-tax-tracker_web_1
+      APP_PORT: 8000
+
+  web:
+    image: arcasats/bitcoin-tax-tracker:latest
+    restart: on-failure
+    stop_grace_period: 1m
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    environment:
+      BTT_DATA_DIR: /data
+      BTT_ASSETS: local
+      # Umbrel fronts the app with its own authenticated app_proxy, so open-mode exposure on
+      # this internal port is acceptable; acknowledge it so the app starts. (First login still
+      # creates the admin — reachable only through Umbrel's authenticated proxy.)
+      BTT_ALLOW_OPEN_EXPOSURE: "1"
+      # Outbound network stays off by default (local-only).
+      BTT_ENABLE_NETWORK: "0"
+      # Point at Umbrel's Electrum server (electrs) for xpub sync.
+      # Adjust host to your Umbrel's electrs service hostname/IP.
+      BTT_ELECTRUM_HOST: ${APP_ELECTRS_NODE_IP:-}
+      BTT_ELECTRUM_PORT: "50001"

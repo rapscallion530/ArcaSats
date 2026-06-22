@@ -1,0 +1,40 @@
+<div id="acct-name">
+  <form class="mt-1 grid sm:grid-cols-2 gap-3 max-w-xl"
+        hx-post="/accounts/{{ account.id }}/edit" hx-target="#acct-name" hx-swap="outerHTML">
+    <label class="text-sm">
+      <span class="text-muted">Account name</span>
+      <input name="name" value="{{ account.name }}" required autofocus
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm">
+      <span class="text-muted">Label (optional)</span>
+      <input name="label_kind" value="{{ account.label_kind }}" placeholder="KYC / non-KYC"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">Owner / holder (blank = you)</span>
+      <input name="owner" value="{{ account.owner }}" placeholder="e.g. blank for you, or a family member's name"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+      <span class="text-xs text-muted">Different owners don't share cost basis — a transfer to them is a gift, and they get a fresh basis.</span>
+    </label>
+    <label class="text-sm">
+      <span class="text-muted">Cost-basis method</span>
+      <select name="lot_method" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        {% for m in ["fifo", "lifo", "hifo"] %}
+        <option value="{{ m }}" {% if account.lot_method == m %}selected{% endif %}>{{ m|upper }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">Note (optional)</span>
+      <input name="note" value="{{ account.note }}"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <div class="sm:col-span-2 flex items-center gap-3">
+      <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Save</button>
+      <button type="button" class="text-sm text-muted hover:text-heading"
+              hx-get="/accounts/{{ account.id }}/name" hx-target="#acct-name" hx-swap="outerHTML">Cancel</button>
+      {% if error %}<span class="text-loss text-sm">{{ error }}</span>{% endif %}
+    </div>
+  </form>
+</div>

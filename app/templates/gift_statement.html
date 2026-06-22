@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Gift statement · ArcaSats{% endblock %}
+
+{% block content %}
+<style>
+  @media print { header, footer, .no-print { display: none !important; } main { background: #fff; } }
+  .gs input { border: none; border-bottom: 1px solid var(--line); background: transparent; }
+</style>
+<div class="max-w-[760px] mx-auto px-5 py-8 gs">
+  <div class="no-print flex items-center justify-between mb-6">
+    <a href="/accounts/{{ account.id }}" class="text-sm text-muted hover:text-heading">&larr; Back to account</a>
+    <button onclick="window.print()" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Print / Save as PDF</button>
+  </div>
+
+  <h1 class="text-2xl text-heading">Bitcoin Gift — Cost Basis Statement</h1>
+  <p class="text-muted text-sm mt-1">Provided by the donor so the recipient can correctly determine basis and holding period on a future sale.</p>
+
+  <section class="mt-6 space-y-3 text-sm">
+    <div class="grid grid-cols-2 gap-4">
+      <label class="block">Donor (legal name)<br><input class="w-full mt-1 px-1 py-1 text-ink" name="donor" value="{{ donor }}" placeholder="Your legal name"></label>
+      <label class="block">Recipient (legal name)<br><input class="w-full mt-1 px-1 py-1 text-ink" name="recipient" value="{{ recipient }}" placeholder="Recipient legal name"></label>
+    </div>
+  </section>
+
+  <section class="mt-6 card bg-surface border border-line rounded-card p-5 text-sm">
+    <h2 class="text-lg text-heading mb-3">Gift details (auto-filled)</h2>
+    <dl class="grid grid-cols-3 gap-y-2">
+      <dt class="text-muted">Asset / amount</dt><dd class="col-span-2 tabular-nums">{{ tx.amount_sats|btc }} BTC</dd>
+      <dt class="text-muted">Gift date</dt><dd class="col-span-2">{{ tx.timestamp.strftime("%Y-%m-%d") }}</dd>
+      <dt class="text-muted">Transaction ID</dt><dd class="col-span-2 font-mono text-xs break-all">{{ tx.txid or "—" }}</dd>
+      <dt class="text-muted">Acquisition date(s)</dt>
+      <dd class="col-span-2">{% if acquisition_dates %}{% for d in acquisition_dates %}{{ d.strftime("%Y-%m-%d") }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}— (enter manually){% endif %}</dd>
+      <dt class="text-muted">Donor's carryover cost basis</dt>
+      <dd class="col-span-2 tabular-nums">{% if carryover_basis is not none %}{{ carryover_basis|usd }}{% else %}— (run "Fetch USD prices" / set basis){% endif %}</dd>
+      <dt class="text-muted">FMV at gift date</dt>
+      <dd class="col-span-2 tabular-nums">{{ fmv|usd if fmv is not none else "— (Fetch USD prices)" }}</dd>
+      <dt class="text-muted">Gift tax paid by donor</dt>
+      <dd class="col-span-2"><input class="px-1 py-0.5 text-ink" name="gift_tax" value="{{ gift_tax }}" placeholder="$0.00"></dd>
+    </dl>
+  </section>
+
+  <section class="mt-5 card bg-surfaceblue border border-line rounded-card p-5 text-sm">
+    <h2 class="text-lg text-headingalt mb-2">Recipient's basis &amp; holding period</h2>
+    <ul class="list-disc list-inside space-y-1">
+      <li><strong>Basis for a future gain:</strong> the donor's carryover cost basis above.</li>
+      <li><strong>Basis for a future loss:</strong> the <em>lesser</em> of the carryover basis or the FMV at the gift date (dual-basis rule).</li>
+      <li><strong>Holding period:</strong> tack the donor's acquisition date(s) — long-term if total holding exceeds one year.</li>
+    </ul>
+  </section>
+
+  {% if not exclusion_known %}
+  <p class="mt-4 text-sm text-warn">The annual gift-tax exclusion for {{ tx.timestamp.year }} isn't in this tool's table; {{ annual_exclusion|usd }} is shown as an estimate. Verify the official figure for that year.</p>
+  {% endif %}
+
+  {% if over_709 %}
+  <p class="mt-4 text-sm text-warn">Note: this gift's FMV exceeds the {{ annual_exclusion|usd }} annual exclusion ({{ tx.timestamp.year }}), so the <strong>donor</strong> likely must file <strong>Form 709</strong> for the year (usually no tax due — it draws on the lifetime exemption).</p>
+  {% endif %}
+
+  <section class="mt-6 text-sm">
+    <p>The donor certifies this is a <strong>bona fide gift</strong> — no repayment, goods, or services are expected in return.</p>
+    <div class="grid grid-cols-2 gap-8 mt-8">
+      <div>Donor signature<br><br>______________________________<br>Date: ____________</div>
+      <div>Recipient acknowledgement<br><br>______________________________<br>Date: ____________</div>
+    </div>
+  </section>
+
+  <p class="mt-6 text-xs text-muted">Not tax advice. Verify against current IRS guidance (Pub 551; Form 709). Figures (e.g. the annual exclusion) change yearly.</p>
+</div>
+{% endblock %}

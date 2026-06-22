@@ -1,0 +1,47 @@
+/* Design tokens — adapted from dirigobtc.org. See docs/design-system.md
+   Colors are CSS variables so dark mode = redefining the variables on html.dark.
+   Tailwind color names map to these vars (see base.html config). */
+:root {
+  --page:#fff8eb; --surface:#fffaf2; --surface-blue:#edf4fb; --nav-bg:#fff8eb; --input-bg:#ffffff;
+  --ink:#14202f; --heading:#10233b; --heading-alt:#072f4c; --muted:#566a77;
+  --line:#ded3c1; --accent:#f7931a; --accent-deep:#df7419;
+  --dark-bg:#10233b; --dark-ink:#fff7e9; --dark-copy:#dce7ef;
+  --tag-bg:#f8dfbd; --tag-ink:#5a320c;
+  --gain:#1d7a5f; --loss:#b3402e; --warn:#b8791b;
+  --btn-bg:#10233b; --btn-bg-hover:#072f4c; --btn-ink:#fff7e9;
+  --radius:14px; --radius-btn:8px;
+  --font-display:Georgia,"Trebuchet MS",serif;
+  --font-body:Inter,"Segoe UI",system-ui,sans-serif;
+  --hero-a:#fff7e9; --hero-b:#d9e8ee;
+  --card-shadow:0 22px 60px rgba(16,35,59,0.12);
+}
+
+html.dark {
+  --page:#0c1521; --surface:#14202f; --surface-blue:#18293b; --nav-bg:#0e1925; --input-bg:#1a2736;
+  --ink:#e7eef6; --heading:#f3f7fb; --heading-alt:#cfe0ee; --muted:#9fb0c0;
+  --line:#243446; --accent:#f7931a; --accent-deep:#ffae42;
+  --dark-bg:#070d15; --dark-ink:#fff7e9; --dark-copy:#b9c6d4;
+  --tag-bg:#3a2a12; --tag-ink:#f3c98a;
+  --gain:#3fae87; --loss:#e3705e; --warn:#e0a23c;
+  --btn-bg:#27496b; --btn-bg-hover:#315a82; --btn-ink:#fff7e9;
+  --hero-a:#101d2b; --hero-b:#16283a;
+  --card-shadow:0 22px 60px rgba(0,0,0,0.45);
+}
+
+html { scroll-behavior: smooth; }
+body { background: var(--page); color: var(--ink); font-family: var(--font-body); transition: background-color .2s ease, color .2s ease; }
+h1,h2,h3,h4 { font-family: var(--font-display); color: var(--heading); }
+
+.hero-gradient { background: linear-gradient(135deg, var(--hero-a) 0%, var(--hero-b) 100%); }
+
+.card { transition: transform .15s ease, box-shadow .15s ease; }
+.card:hover { transform: translateY(-2px); box-shadow: var(--card-shadow); }
+
+.htmx-indicator { opacity: 0; transition: opacity .2s ease; }
+.htmx-request .htmx-indicator { opacity: 1; }
+
+/* Collapsible disclosure (progressive disclosure for input forms) */
+details.disc > summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 1rem; color: var(--heading); font-weight: 600; }
+details.disc > summary::-webkit-details-marker { display: none; }
+details.disc > summary::after { content: "+"; color: var(--accent); font-size: 1.2rem; line-height: 1; }
+details.disc[open] > summary::after { content: "\2212"; }

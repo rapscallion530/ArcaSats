@@ -1,0 +1,141 @@
+<div id="wallets" class="card bg-surface border border-line rounded-card p-6">
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <h2 class="text-xl text-heading mb-1">Wallets</h2>
+    {% if wallets and electrum_host %}
+    <span>
+      <span class="htmx-indicator text-xs text-muted">syncing all over Tor…</span>
+      <button class="text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-1"
+              hx-post="/accounts/{{ account.id }}/sync-all" hx-target="#tx-table" hx-swap="outerHTML"
+              hx-disabled-elt="this" title="Re-scan every xpub in this account and reconcile transfers">Sync all</button>
+    </span>
+    {% endif %}
+  </div>
+  <p class="text-muted text-sm mb-4">
+    Add a watch-only <strong>xpub/ypub/zpub</strong> and sync on-chain history from your Electrum server.
+    {% if electrum_host %}
+      <span class="text-gain">Electrum: {{ electrum_host[:18] }}…</span> (<a href="/settings" class="underline hover:text-heading">Settings</a>)
+    {% else %}
+      <span class="text-warn">No Electrum server configured — set one in <a href="/settings" class="underline">Settings &rarr; Node</a> to enable sync.</span>
+    {% endif %}
+  </p>
+
+  {% if wallets %}
+  <div class="space-y-2 mb-5">
+    {% for w in wallets %}
+    <div id="wallet-{{ w.id }}" class="border border-line rounded-[8px] px-3 py-2 text-sm">
+      {% if editing_id == w.id %}
+      <!-- inline edit form -->
+      <form class="grid sm:grid-cols-4 gap-2 items-end"
+            hx-post="/wallets/{{ w.id }}/edit" hx-target="#wallets" hx-swap="outerHTML">
+        <label class="text-xs">
+          <span class="text-muted">Label</span>
+          <input name="label" value="{{ w.label }}" required
+                 class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        </label>
+        <label class="text-xs sm:col-span-2">
+          <span class="text-muted">Extended public key or multisig descriptor</span>
+          <input name="xpub" value="{{ w.xpub or '' }}" autocomplete="off"
+                 class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink font-mono text-[11px] focus:outline-none focus:border-accent">
+        </label>
+        <label class="text-xs">
+          <span class="text-muted">Gap limit</span>
+          <input name="gap_limit" type="number" value="{{ w.gap_limit }}" min="1" max="100"
+                 class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        </label>
+        <label class="text-xs sm:col-span-2">
+          <span class="text-muted">On-chain classification</span>
+          <select name="onchain_mode" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+            <option value="standalone" {% if (w.onchain_mode or 'standalone') == 'standalone' %}selected{% endif %}>Standalone — receives = buys, sends = sells (taxable)</option>
+            <option value="custodial_fed" {% if w.onchain_mode == 'custodial_fed' %}selected{% endif %}>Self-custody fed by an exchange I import — transfers</option>
+          </select>
+        </label>
+        <label class="text-xs sm:col-span-2">
+          <span class="text-muted">Address type (single-sig)</span>
+          <select name="address_type" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+            <option value="auto" {% if (w.address_type or 'auto') == 'auto' %}selected{% endif %}>Auto-detect</option>
+            <option value="p2wpkh" {% if w.address_type == 'p2wpkh' %}selected{% endif %}>Native SegWit (bc1q)</option>
+            <option value="p2sh-p2wpkh" {% if w.address_type == 'p2sh-p2wpkh' %}selected{% endif %}>Nested SegWit (3…)</option>
+            <option value="p2pkh" {% if w.address_type == 'p2pkh' %}selected{% endif %}>Legacy (1…)</option>
+          </select>
+        </label>
+        <div class="sm:col-span-4 flex items-center gap-3">
+          <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Save</button>
+          <button type="button" class="text-sm text-muted hover:text-heading"
+                  hx-get="/accounts/{{ account.id }}/wallets" hx-target="#wallets" hx-swap="outerHTML">Cancel</button>
+          {% if edit_error %}<span class="text-loss text-sm">{{ edit_error }}</span>{% endif %}
+        </div>
+      </form>
+      {% else %}
+      <!-- normal row -->
+      <div class="group flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <span class="text-heading">{{ w.label }}</span>
+          <span class="text-xs ml-2 px-2 py-0.5 rounded-full bg-surfaceblue text-headingalt">{{ w.wtype }}{% if w.script_type %} · {{ w.script_type }}{% endif %}</span>
+          {% if w.xpub %}<div class="text-muted text-xs font-mono truncate">{{ w.xpub[:24] }}…{{ w.xpub[-6:] }}</div>{% endif %}
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          {% if w.wtype == "xpub" %}
+          <span class="htmx-indicator text-xs text-muted">syncing over Tor…</span>
+          <button class="text-sm px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink hover:bg-btnbghover disabled:opacity-50"
+                  hx-post="/wallets/{{ w.id }}/sync" hx-target="#tx-table" hx-swap="outerHTML" hx-disabled-elt="this">Sync</button>
+          {% endif %}
+          <span class="flex items-center gap-2 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button class="text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-1"
+                    hx-get="/wallets/{{ w.id }}/edit-form" hx-target="#wallets" hx-swap="outerHTML">edit</button>
+            <button class="text-xs text-muted hover:text-loss border border-line rounded-[6px] px-2 py-1"
+                    hx-post="/wallets/{{ w.id }}/delete" hx-target="#wallets" hx-swap="outerHTML"
+                    hx-confirm="Delete wallet '{{ w.label }}' and its imported transactions?">delete</button>
+          </span>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if edit_error and editing_id is none %}
+  <div class="mb-3 rounded-[8px] border border-loss/40 bg-loss/10 px-3 py-2 text-sm text-loss">{{ edit_error }}</div>
+  {% endif %}
+
+  <form class="grid sm:grid-cols-4 gap-3 items-end"
+        hx-post="/accounts/{{ account.id }}/wallets" hx-target="#wallets" hx-swap="outerHTML"
+        hx-on::after-request="if(event.detail.successful) this.reset()">
+    <label class="text-sm">
+      <span class="text-muted">Label</span>
+      <input name="label" required placeholder="Coldcard"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">Extended public key or multisig descriptor</span>
+      <input name="xpub" required placeholder="zpub6r… (single-sig) or wsh(sortedmulti(2,…)) (multisig)" autocomplete="off"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm">
+      <span class="text-muted">Gap limit</span>
+      <input name="gap_limit" type="number" value="20" min="1" max="100"
+             class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">On-chain classification</span>
+      <select name="onchain_mode" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        <option value="standalone">Standalone — receives = buys, sends = sells (taxable; your primary wallet)</option>
+        <option value="custodial_fed">Self-custody fed by an exchange I import — transfers (basis from the CSV)</option>
+      </select>
+    </label>
+    <label class="text-sm sm:col-span-2">
+      <span class="text-muted">Address type</span>
+      <select name="address_type" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        <option value="auto">Auto-detect (recommended)</option>
+        <option value="p2wpkh">Native SegWit (bc1q)</option>
+        <option value="p2sh-p2wpkh">Nested SegWit (3…)</option>
+        <option value="p2pkh">Legacy (1…)</option>
+      </select>
+      <span class="text-muted text-xs">Single-sig only; pick a type if a brand-new wallet has no history yet to detect from. Ignored for multisig descriptors. Cross-wallet transfers are auto-detected.</span>
+    </label>
+    <div class="sm:col-span-4">
+      <button type="submit" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Add wallet</button>
+      <span class="htmx-indicator text-sm text-muted ml-2">working…</span>
+    </div>
+  </form>
+</div>

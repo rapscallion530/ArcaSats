@@ -1,0 +1,4 @@
+Date,Event,BTC Amount,USD Amount,BTC Price,Transaction ID
+2025-01-10,Purchase,0.00250000,225.00,90000.00,swan-001
+2025-02-15,Withdrawal,0.00250000,,,swan-002
+2025-03-12,Purchase,0.00150000,138.00,92000.00,swan-003

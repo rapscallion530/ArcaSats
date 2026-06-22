@@ -1,0 +1,6 @@
+# Runtime dependencies, pinned for reproducible builds. Bump deliberately.
+fastapi==0.137.1
+uvicorn[standard]==0.49.0
+jinja2==3.1.6
+python-multipart==0.0.32
+sqlalchemy==2.0.51

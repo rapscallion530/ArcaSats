@@ -1,0 +1,12 @@
+<div id="llm-test">
+  {% if result %}
+  <div class="rounded-[8px] border px-4 py-3 text-sm {{ 'border-gain text-gain' if result.ok else 'border-loss text-loss' }}">
+    {% if result.ok %}
+      Connected{% if result.latency_ms %} ({{ result.latency_ms }} ms){% endif %} — model said:
+      <span class="text-ink">{{ result.text }}</span>
+    {% else %}
+      {{ result.error }}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

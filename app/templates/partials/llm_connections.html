@@ -1,0 +1,100 @@
+<div id="llm-conns">
+  {% set editing = editing_id|default(None) %}
+
+  {% if llm_conns %}
+  <div class="space-y-2 mb-5">
+    {% for c in llm_conns %}
+    <div class="border border-line rounded-[8px] px-3 py-2 text-sm">
+      {% if editing == c.id %}
+      <!-- inline edit -->
+      <form class="grid sm:grid-cols-6 gap-2 items-end"
+            hx-post="/settings/llm/{{ c.id }}/edit" hx-target="#llm-conns" hx-swap="outerHTML">
+        <label class="text-xs"><span class="text-muted">Name</span>
+          <input name="name" value="{{ c.name }}" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent"></label>
+        <label class="text-xs"><span class="text-muted">Type</span>
+          <select name="provider" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+            <option value="ollama" {% if c.provider=='ollama' %}selected{% endif %}>Ollama</option>
+            <option value="openai" {% if c.provider=='openai' %}selected{% endif %}>OpenAI-compatible</option>
+          </select></label>
+        <label class="text-xs sm:col-span-2"><span class="text-muted">Base URL</span>
+          <input name="base_url" value="{{ c.base_url }}" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink font-mono text-[11px] focus:outline-none focus:border-accent"></label>
+        <label class="text-xs sm:col-span-2"><span class="text-muted">Model</span>
+          <input name="model" value="{{ c.model }}" list="models-{{ c.id }}" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+          <datalist id="models-{{ c.id }}"></datalist></label>
+        <p class="text-xs text-muted sm:col-span-6 mt-1">The assistant only ever sends data to a model on this machine or your LAN (loopback/private address). Non-local endpoints are refused.</p>
+        <div class="sm:col-span-6 flex flex-wrap items-center gap-3">
+          <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Save</button>
+          <button type="button" class="text-sm text-muted hover:text-heading"
+                  hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-{{ c.id }}" hx-swap="innerHTML">List models</button>
+          <button type="button" class="text-sm text-muted hover:text-heading"
+                  hx-post="/settings/llm/test" hx-include="closest form" hx-target="#llm-test" hx-swap="outerHTML">Test</button>
+          <button type="button" class="text-sm text-muted hover:text-heading"
+                  hx-get="/settings" hx-target="#llm-conns" hx-select="#llm-conns" hx-swap="outerHTML">Cancel</button>
+          <span class="htmx-indicator text-xs text-muted">working…</span>
+        </div>
+      </form>
+      {% else %}
+      <!-- normal row -->
+      <div class="group flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <span class="text-heading">{{ c.name }}</span>
+          {% if c.is_default %}<span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-tagbg text-tagink">default</span>{% endif %}
+          <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-headingalt">{{ 'Ollama' if c.provider=='ollama' else 'OpenAI-compat' }}</span>
+          {% if c.base_url and not (c.base_url.startswith('http://127.') or c.base_url.startswith('http://localhost') or '://192.168.' in c.base_url or '://10.' in c.base_url or '.local' in c.base_url) %}
+            <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full border border-warn text-warn" title="not a loopback/LAN address">non-local</span>
+          {% else %}
+            <span class="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-tagbg text-tagink">local</span>
+          {% endif %}
+          <div class="text-muted text-xs font-mono truncate">{{ c.base_url }} · {{ c.model or 'no model set' }}</div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          {% if not c.is_default %}
+          <button class="text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-1"
+                  hx-post="/settings/llm/{{ c.id }}/default" hx-target="#llm-conns" hx-swap="outerHTML">make default</button>
+          {% endif %}
+          <button class="text-xs text-muted hover:text-heading border border-line rounded-[6px] px-2 py-1"
+                  hx-get="/settings/llm/{{ c.id }}/edit-form" hx-target="#llm-conns" hx-swap="outerHTML">edit</button>
+          <button class="text-xs text-muted hover:text-loss border border-line rounded-[6px] px-2 py-1"
+                  hx-post="/settings/llm/{{ c.id }}/delete" hx-target="#llm-conns" hx-swap="outerHTML"
+                  hx-confirm="Delete connection '{{ c.name }}'?">delete</button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-sm text-muted mb-4">No local models connected yet. Add one below — for example
+    <a href="https://ollama.com" target="_blank" rel="noopener" class="underline hover:text-heading">Ollama</a>
+    on this machine usually runs at <code>http://127.0.0.1:11434</code>.</p>
+  {% endif %}
+
+  <!-- Add connection -->
+  <form class="grid sm:grid-cols-6 gap-2 items-end border-t border-line pt-4"
+        hx-post="/settings/llm/add" hx-target="#llm-conns" hx-swap="outerHTML"
+        hx-on::after-request="if(event.detail.successful) this.reset()">
+    <label class="text-xs"><span class="text-muted">Name</span>
+      <input name="name" placeholder="Qwen (local)" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent"></label>
+    <label class="text-xs"><span class="text-muted">Type</span>
+      <select name="provider" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        <option value="ollama">Ollama</option>
+        <option value="openai">OpenAI-compatible</option>
+      </select></label>
+    <label class="text-xs sm:col-span-2"><span class="text-muted">Base URL</span>
+      <input name="base_url" value="http://127.0.0.1:11434" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink font-mono text-[11px] focus:outline-none focus:border-accent"></label>
+    <label class="text-xs sm:col-span-2"><span class="text-muted">Model</span>
+      <input name="model" placeholder="qwen2.5:7b" list="models-add" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+      <datalist id="models-add"></datalist></label>
+    <p class="text-xs text-muted sm:col-span-6 mt-1">Local-only: your data is sent only to a model on this machine or your LAN. Non-local endpoints are refused.</p>
+    <div class="sm:col-span-6 flex flex-wrap items-center gap-3">
+      <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Add connection</button>
+      <button type="button" class="text-sm text-muted hover:text-heading"
+              hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-add" hx-swap="innerHTML">List models</button>
+      <button type="button" class="text-sm text-muted hover:text-heading"
+              hx-post="/settings/llm/test" hx-include="closest form" hx-target="#llm-test" hx-swap="innerHTML">Test</button>
+      <span class="htmx-indicator text-xs text-muted">working…</span>
+    </div>
+  </form>
+
+  <div class="mt-3">{% include "partials/llm_test.html" %}</div>
+</div>

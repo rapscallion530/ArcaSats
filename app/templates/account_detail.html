@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ account.name }} &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+
+  <div class="flex items-start justify-between">
+    <div>
+      <a href="/accounts" class="text-sm text-muted hover:text-heading">&larr; Accounts</a>
+      {% include "partials/account_name.html" %}
+    </div>
+    {% include "partials/account_actions.html" %}
+  </div>
+
+  <!-- Read-first: the numbers, the wallets, the activity -->
+  {% include "partials/cost_basis.html" %}
+  {% include "partials/wallets.html" %}
+  {% include "partials/tx_table.html" %}
+
+  <!-- Inputs tucked behind disclosures to keep the view clean -->
+  <details class="disc card bg-surface border border-line rounded-card p-5">
+    <summary class="text-lg">Add transaction</summary>
+    <form class="mt-4 grid sm:grid-cols-3 gap-4"
+          hx-post="/accounts/{{ account.id }}/transactions" hx-target="#tx-table" hx-swap="outerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <label class="text-sm">
+        <span class="text-muted">Type</span>
+        <select name="kind" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+          {% for k in kinds %}<option value="{{ k }}">{{ labels.get(k, k) }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="text-sm">
+        <span class="text-muted">Date</span>
+        <input name="timestamp" type="date" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+      </label>
+      <label class="text-sm">
+        <span class="text-muted">Amount (BTC)</span>
+        <input name="amount_btc" type="text" inputmode="decimal" placeholder="0.01000000"
+               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+      </label>
+      <label class="text-sm">
+        <span class="text-muted">USD value</span>
+        <input name="fiat_value" type="text" inputmode="decimal" placeholder="650.00"
+               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+      </label>
+      <label class="text-sm">
+        <span class="text-muted">Counterparty (optional)</span>
+        <input name="counterparty" type="text" placeholder="Coinbase, Strike, ..."
+               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+      </label>
+      <div class="flex items-end">
+        <button type="submit" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover w-full">Add</button>
+      </div>
+    </form>
+    <p class="text-xs text-muted mt-3">Buys &amp; income create cost-basis lots; sells &amp; spends are taxable disposals. Transfers move coins without realizing gain. Use <strong>Opening balance</strong> (with date &amp; USD basis) for coins held before you started tracking, or your Rev. Proc. 2024-28 starting basis as of 2025-01-01.</p>
+  </details>
+
+  <details class="disc card bg-surface border border-line rounded-card p-5">
+    <summary class="text-lg">Import CSV</summary>
+    <p class="text-muted text-sm mt-1 mb-4">Upload a transaction export (Coinbase / Strike / Swan / Bisq / generic). Re-importing is safe — duplicates are skipped.</p>
+    <form class="grid sm:grid-cols-3 gap-4 items-end"
+          hx-post="/accounts/{{ account.id }}/import/csv" hx-target="#tx-table" hx-swap="outerHTML"
+          hx-encoding="multipart/form-data">
+      <label class="text-sm">
+        <span class="text-muted">Source</span>
+        <select name="source" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+          <option value="coinbase">Coinbase</option>
+          <option value="strike">Strike</option>
+          <option value="swan">Swan</option>
+          <option value="bisq">Bisq</option>
+          <option value="generic">Generic</option>
+        </select>
+      </label>
+      <label class="text-sm sm:col-span-2">
+        <span class="text-muted">CSV file</span>
+        <input name="file" type="file" accept=".csv,text/csv" required
+               class="mt-1 w-full text-sm text-ink file:mr-3 file:rounded-[8px] file:border-0 file:bg-btnbg file:text-btnink file:px-3 file:py-2">
+      </label>
+      <div class="sm:col-span-3">
+        <button type="submit" class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Import</button>
+        <span class="htmx-indicator text-sm text-muted ml-2">importing&hellip;</span>
+      </div>
+    </form>
+  </details>
+
+</div>
+{% endblock %}

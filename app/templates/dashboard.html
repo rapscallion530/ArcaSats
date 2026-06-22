@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Dashboard &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<section class="hero-gradient border-b border-line">
+  <div class="max-w-[1160px] mx-auto px-5 py-12">
+    <div class="flex items-center gap-2 text-accent font-medium text-sm">
+      <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent text-white text-xs font-bold">&#8383;</span>
+      ArcaSats &middot; {{ TAGLINE }}
+    </div>
+    <h1 class="text-3xl sm:text-4xl text-heading max-w-2xl leading-tight mt-2">
+      Track every sat, by account, on your own terms.
+    </h1>
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      <button hx-get="/partials/add-account-form" hx-target="#panel" hx-swap="innerHTML"
+              class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
+        + Add account
+      </button>
+      <span class="htmx-indicator self-center text-sm text-muted">working&hellip;</span>
+    </div>
+  </div>
+</section>
+
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+
+  <!-- Node status (loads async over Tor) -->
+  <div id="node-widget" class="card bg-surface border border-line rounded-card px-5 py-3"
+       hx-get="/node/status" hx-trigger="load" hx-target="#node-widget" hx-swap="innerHTML">
+    <span class="text-sm text-muted">Checking node&hellip;</span>
+  </div>
+
+  <div id="panel"></div>
+
+  <!-- Compact totals -->
+  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted">
+    <span><span class="text-heading font-medium">{{ account_count }}</span> accounts</span>
+    <span><span class="text-heading font-medium">{{ total_wallets }}</span> wallets</span>
+    <span><span class="text-heading font-medium">{{ total_sats|btcamt }}</span> <span class="unit">BTC</span> tracked</span>
+  </div>
+
+  <section id="accounts">
+    <div class="flex items-baseline justify-between mb-3">
+      <h2 class="text-xl text-heading">Accounts</h2>
+      <span class="text-xs text-muted">per-account FIFO &middot; Rev. Proc. 2024-28</span>
+    </div>
+    {% include "partials/accounts_grid.html" %}
+  </section>
+
+</div>
+{% endblock %}
