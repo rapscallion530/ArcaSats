@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so `import app` resolves under a bare `pytest`
+# invocation. Running `pytest` (the console script) does NOT add the current
+# directory to sys.path the way `python -m pytest` does, so without this the
+# suite collects fine locally via `-m` but fails in CI (which runs `pytest`).
+pythonpath = ["."]
+testpaths = ["tests"]
