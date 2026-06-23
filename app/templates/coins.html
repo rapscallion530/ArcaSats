@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Coins &middot; {{ account.name }} &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+
+  <div>
+    <a href="/accounts/{{ account.id }}" class="text-sm text-muted hover:text-heading">&larr; {{ account.name }}</a>
+    <h1 class="text-2xl text-heading mt-1">Coins &amp; privacy</h1>
+    <p class="text-muted text-sm mt-1">
+      The live UTXO inventory for this account's on-chain wallets, plus a privacy read on how
+      these coins are linked. Computed locally from your own coins only.
+    </p>
+  </div>
+
+  <!-- Summary -->
+  <div class="flex items-baseline gap-6 flex-wrap">
+    <div>
+      <div class="text-3xl text-heading tabular-nums">{{ total_sats|btcamt }} <span class="unit text-lg">BTC</span></div>
+      <div class="text-muted text-sm">{{ utxos|length }} unspent output(s)</div>
+    </div>
+  </div>
+
+  <!-- Privacy warnings -->
+  {% if warnings %}
+  <div class="space-y-3">
+    {% for w in warnings %}
+    <div class="rounded-card border px-4 py-3 text-sm
+                {% if w.level == 'warn' %}border-warn text-warn bg-warn/10{% else %}border-line text-heading bg-surfaceblue{% endif %}">
+      <div class="font-medium">{{ w.title }}</div>
+      <div class="mt-0.5 {% if w.level != 'warn' %}text-muted{% endif %}">{{ w.detail }}</div>
+      {% if w.txids %}
+      <div class="mt-1 text-xs {% if w.level == 'warn' %}text-warn/80{% else %}text-muted{% endif %}">
+        {% for tx in w.txids %}
+          {% if mempool_url %}<a class="hover:underline" target="_blank" rel="noopener" href="{{ mempool_url }}/tx/{{ tx }}">{{ tx[:12] }}…&#8599;</a>{% else %}{{ tx[:16] }}…{% endif %}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rounded-card border border-line bg-surfaceblue px-4 py-3 text-sm text-muted">
+    No privacy flags on the current coin set.
+  </div>
+  {% endif %}
+
+  <!-- UTXO inventory -->
+  {% if utxos %}
+  <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium">Received</th>
+          <th class="px-4 py-3 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-4 py-3 font-medium">Address</th>
+          <th class="px-4 py-3 font-medium">Type</th>
+          <th class="px-4 py-3 font-medium">Label</th>
+          <th class="px-4 py-3 font-medium">Outpoint</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in utxos %}
+        <tr class="border-b border-line/60 last:border-0">
+          <td class="px-4 py-3 whitespace-nowrap">{{ u.created_at.strftime("%Y-%m-%d") }}</td>
+          <td class="px-4 py-3 text-right tabular-nums">{{ u.value_sats|btcamt }}</td>
+          <td class="px-4 py-3 font-mono text-xs text-muted" title="{{ u.address }}">
+            {% if u.address %}{{ u.address[:12] }}…{{ u.address[-6:] }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            {% if u.is_change %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-warn" title="Change output — linked to the payment that created it">change</span>
+            {% else %}
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-headingalt">receive</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-muted">{{ u.label_kind or "—" }}</td>
+          <td class="px-4 py-3 font-mono text-xs whitespace-nowrap">
+            {% if mempool_url %}
+            <a class="text-muted hover:text-heading" target="_blank" rel="noopener"
+               href="{{ mempool_url }}/tx/{{ u.txid }}" title="Inspect on your block explorer">{{ u.txid[:10] }}…:{{ u.vout }}&#8599;</a>
+            {% else %}<span class="text-muted">{{ u.txid[:10] }}…:{{ u.vout }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card bg-surface border border-dashed border-line rounded-card p-8 text-center text-muted">
+    No coins tracked yet. Sync an xpub or descriptor wallet to populate the UTXO inventory.
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

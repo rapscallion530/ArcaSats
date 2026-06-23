@@ -108,6 +108,7 @@ class Wallet(Base):
 
     account: Mapped[Account] = relationship(back_populates="wallets")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="wallet", cascade="all, delete-orphan")
+    utxos: Mapped[list[Utxo]] = relationship(cascade="all, delete-orphan")
 
 
 class Transaction(Base):
@@ -182,6 +183,56 @@ class Transaction(Base):
         if self.kind in TxKind.ACQUISITIONS:
             return self.amount_sats
         return -self.amount_sats
+
+
+class Utxo(Base):
+    """A single on-chain output owned by an xpub/descriptor wallet — the UTXO-level inventory
+    that complements (does not replace) the net-per-tx Transaction ledger.
+
+    Only on-chain wallets have UTXOs; custodial CSV sources are omnibus wallets with no
+    output-level visibility. Provenance/privacy features (coin labels, KYC/non-KYC merge
+    detection, address reuse, change tracking) read from this table; the cost-basis engine
+    is unaffected. spent_txid IS NULL means the coin is currently unspent (a live UTXO).
+    """
+    __tablename__ = "utxos"
+    __table_args__ = (
+        # An outpoint is unique within a wallet (the same descriptor loaded as two wallets may
+        # legitimately see the same outpoint, so we scope to the wallet rather than globally).
+        UniqueConstraint("wallet_id", "txid", "vout", name="uq_utxo_wallet_outpoint"),
+        Index("ix_utxo_account", "account_id"),
+        Index("ix_utxo_spent_txid", "spent_txid"),   # group inputs of a spend (merge detection)
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"), index=True)
+
+    txid: Mapped[str] = mapped_column(String(80))      # creating transaction
+    vout: Mapped[int] = mapped_column()                # output index within that tx
+    value_sats: Mapped[int] = mapped_column(default=0)
+    address: Mapped[str] = mapped_column(String(120), default="")
+    script_type: Mapped[str] = mapped_column(String(24), default="")
+    chain: Mapped[int] = mapped_column(default=0)      # 0 = receive, 1 = change
+    deriv_index: Mapped[int] = mapped_column(default=0)
+    is_change: Mapped[bool] = mapped_column(default=False)
+    # Provenance snapshot of the owning account's label (e.g. "KYC" / "non-KYC"), refreshed
+    # each sync so a relabel propagates. Drives the KYC/non-KYC coin-merge warning.
+    label_kind: Mapped[str] = mapped_column(String(40), default="")
+
+    created_height: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
+    spent_txid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    spent_height: Mapped[int | None] = mapped_column(nullable=True)
+    spent_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
+
+    @property
+    def value_btc(self) -> Decimal:
+        return Decimal(self.value_sats) / SATS_PER_BTC
+
+    @property
+    def spent(self) -> bool:
+        return self.spent_txid is not None
 
 
 class PricePoint(Base):

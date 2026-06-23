@@ -23,7 +23,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SATS_PER_BTC, Transaction, TxKind, Wallet
+from app.models import SATS_PER_BTC, Account, Transaction, TxKind, Utxo, Wallet
 from app.services import transactions as tx_svc
 from app.services.bip32 import derive_addresses, key_kind
 from app.services.electrum import ElectrumLike
@@ -57,8 +57,26 @@ class OnChainTx:
 
 
 @dataclass
+class OnChainUtxo:
+    """One output paying one of our addresses. spent_txid is None while unspent."""
+    txid: str
+    vout: int
+    value_sats: int
+    address: str
+    chain: int              # 0 receive, 1 change
+    deriv_index: int
+    script_type: str = ""
+    created_height: int = 0
+    created_at: dt.datetime | None = None
+    spent_txid: str | None = None
+    spent_height: int | None = None
+    spent_at: dt.datetime | None = None
+
+
+@dataclass
 class ScanResult:
     txs: list[OnChainTx] = field(default_factory=list)
+    utxos: list[OnChainUtxo] = field(default_factory=list)
     addresses_scanned: int = 0
     error: str = ""
     script_type: str = ""
@@ -78,12 +96,21 @@ def _vout_address(vout: dict) -> str | None:
     return None
 
 
+def _blocktime(tx: dict) -> dt.datetime:
+    ts_unix = tx.get("blocktime") or tx.get("time")
+    if ts_unix:
+        return dt.datetime.fromtimestamp(ts_unix, dt.UTC).replace(tzinfo=None)
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
 def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
                     max_per_chain: int, result: ScanResult) -> None:
     """Walk each chain with a gap limit using `derive_one(chain, index) -> address`, collect
-    the wallet's addresses + touching txids, then compute each tx's net (received - sent) from
-    its verbose vin/vout. Address-type-agnostic — works for single-sig and multisig alike."""
-    our_addrs: set[str] = set()
+    the wallet's addresses + touching txids, then derive both the per-output UTXO inventory
+    (result.utxos) and each tx's net received-sent (result.txs). Address-type-agnostic — works
+    for single-sig and multisig alike."""
+    # addr -> (chain, deriv_index); membership in this map == "this address is ours".
+    addr_meta: dict[str, tuple[int, int]] = {}
     txid_height: dict[str, int] = {}
     for chain in chains:
         unused_run = 0
@@ -91,7 +118,7 @@ def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
         while unused_run < gap_limit and i < max_per_chain:
             addr = derive_one(chain, i)
             hist = client.get_history(scripthash(addr))
-            our_addrs.add(addr)
+            addr_meta[addr] = (chain, i)
             result.addresses_scanned += 1
             if hist:
                 unused_run = 0
@@ -108,37 +135,49 @@ def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
             tx_cache[txid] = client.get_transaction(txid, verbose=True)
         return tx_cache[txid]
 
+    # Pass 1 — record every output paying one of our addresses as a (provisionally unspent)
+    # UTXO, and tally received-per-tx. Building all outputs first means pass 2 can mark spends
+    # regardless of the order txs are visited (a spend may be processed before its funding tx).
+    created: dict[tuple[str, int], OnChainUtxo] = {}
+    received_by_tx: dict[str, int] = {}
+    sent_by_tx: dict[str, int] = {}
+    rep_addr: dict[str, str] = {}
+    ts_by_tx: dict[str, dt.datetime] = {}
     for txid, height in txid_height.items():
         tx = get_tx(txid)
-        received = 0
-        rep_addr = ""
-        for vout in tx.get("vout", []):
+        ts_by_tx[txid] = _blocktime(tx)
+        for vidx, vout in enumerate(tx.get("vout", [])):
             addr = _vout_address(vout)
-            if addr in our_addrs:
-                received += _val_to_sats(vout.get("value", 0))
-                rep_addr = rep_addr or addr
-        sent = 0
-        for vin in tx.get("vin", []):
-            ptxid = vin.get("txid")
-            # Only inputs spending one of OUR prior txs can be ours; skipping the rest avoids
-            # fetching thousands of unrelated txs over Tor.
-            if not ptxid or ptxid not in txid_height:
+            meta = addr_meta.get(addr)
+            if meta is None:
                 continue
-            prev = get_tx(ptxid)
-            pv = prev.get("vout", [])
-            idx = vin.get("vout", 0)
-            if idx < len(pv):
-                paddr = _vout_address(pv[idx])
-                if paddr in our_addrs:
-                    sent += _val_to_sats(pv[idx].get("value", 0))
-                    rep_addr = rep_addr or paddr
-        net = received - sent
+            val = _val_to_sats(vout.get("value", 0))
+            received_by_tx[txid] = received_by_tx.get(txid, 0) + val
+            rep_addr.setdefault(txid, addr)
+            created[(txid, vidx)] = OnChainUtxo(
+                txid=txid, vout=vidx, value_sats=val, address=addr,
+                chain=meta[0], deriv_index=meta[1], script_type=result.script_type,
+                created_height=height, created_at=ts_by_tx[txid])
+
+    # Pass 2 — any input spending one of our recorded outputs marks that UTXO spent and counts
+    # toward sent. A vin whose prior output we didn't record isn't ours, so it's ignored.
+    for txid, height in txid_height.items():
+        for vin in get_tx(txid).get("vin", []):
+            ptxid = vin.get("txid")
+            u = created.get((ptxid, vin.get("vout", 0))) if ptxid else None
+            if u is None:
+                continue
+            sent_by_tx[txid] = sent_by_tx.get(txid, 0) + u.value_sats
+            rep_addr.setdefault(txid, u.address)
+            u.spent_txid, u.spent_height, u.spent_at = txid, height, ts_by_tx[txid]
+
+    result.utxos = list(created.values())
+    for txid, height in txid_height.items():
+        net = received_by_tx.get(txid, 0) - sent_by_tx.get(txid, 0)
         if net == 0:
             continue
-        ts_unix = tx.get("blocktime") or tx.get("time")
-        ts = (dt.datetime.fromtimestamp(ts_unix, dt.UTC).replace(tzinfo=None)
-              if ts_unix else dt.datetime.now(dt.UTC).replace(tzinfo=None))
-        result.txs.append(OnChainTx(txid=txid, timestamp=ts, net_sats=net, height=height, address=rep_addr))
+        result.txs.append(OnChainTx(txid=txid, timestamp=ts_by_tx[txid], net_sats=net,
+                                    height=height, address=rep_addr.get(txid, "")))
 
 
 def scan_xpub(
@@ -181,6 +220,31 @@ def scan_descriptor(
     return result
 
 
+def persist_utxos(session: Session, wallet: Wallet, utxos: list[OnChainUtxo]) -> None:
+    """Upsert the wallet's UTXO inventory, keyed on (wallet, txid, vout). Idempotent: a re-sync
+    refreshes spent status (a previously-unspent coin that's now spent) and the provenance label
+    without duplicating rows. On-chain history is append-only, so we never delete here."""
+    acct = session.get(Account, wallet.account_id)
+    label = acct.label_kind if acct else ""
+    existing = {
+        (u.txid, u.vout): u
+        for u in session.scalars(select(Utxo).where(Utxo.wallet_id == wallet.id))
+    }
+    for oc in utxos:
+        row = existing.get((oc.txid, oc.vout))
+        if row is None:
+            session.add(Utxo(
+                account_id=wallet.account_id, wallet_id=wallet.id, txid=oc.txid, vout=oc.vout,
+                value_sats=oc.value_sats, address=oc.address, script_type=oc.script_type,
+                chain=oc.chain, deriv_index=oc.deriv_index, is_change=(oc.chain == 1),
+                label_kind=label, created_height=oc.created_height, created_at=oc.created_at,
+                spent_txid=oc.spent_txid, spent_height=oc.spent_height, spent_at=oc.spent_at))
+        else:
+            row.spent_txid, row.spent_height, row.spent_at = oc.spent_txid, oc.spent_height, oc.spent_at
+            row.label_kind = label
+    session.commit()
+
+
 def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_limit: int | None = None):
     """Scan a wallet (single-sig xpub OR multisig descriptor) and persist its on-chain activity.
     Returns an ImportResult (imported / skipped / errors)."""
@@ -204,6 +268,8 @@ def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_l
     if scan.script_type and wallet.script_type != scan.script_type:
         wallet.script_type = scan.script_type
         session.commit()
+
+    persist_utxos(session, wallet, scan.utxos)
 
     mode = wallet.onchain_mode or "standalone"
     src = f"xpub:{wallet.id}"

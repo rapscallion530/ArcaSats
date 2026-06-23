@@ -14,6 +14,9 @@
 
   <!-- Read-first: the numbers, the wallets, the activity -->
   {% include "partials/cost_basis.html" %}
+  <div class="-mt-4">
+    <a href="/accounts/{{ account.id }}/coins" class="text-sm text-accent hover:text-heading">Coins &amp; privacy &rarr;</a>
+  </div>
   {% include "partials/wallets.html" %}
   {% include "partials/tx_table.html" %}
 

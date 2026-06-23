@@ -18,6 +18,7 @@ from app import config
 from app.db import get_session
 from app.models import TxKind, WalletType
 from app.services import accounts as accounts_svc
+from app.services import coins as coins_svc
 from app.services import costbasis
 from app.services import node_settings
 from app.services import sync as sync_svc
@@ -129,6 +130,22 @@ async def account_audit(account_id: int, request: Request, session: Session = De
     return templates.TemplateResponse(
         request, "audit.html",
         {"account": account, "cb": costbasis.compute_account(session, account_id)},
+    )
+
+
+@router.get("/accounts/{account_id}/coins", response_class=HTMLResponse)
+async def account_coins(account_id: int, request: Request, session: Session = Depends(get_session)):
+    """UTXO inventory + privacy analysis for the account's on-chain coins."""
+    account = _account(session, account_id, request)
+    if account is None:
+        return RedirectResponse("/accounts", status_code=303)
+    utxos = coins_svc.list_utxos(session, account_id, unspent_only=True)
+    return templates.TemplateResponse(
+        request, "coins.html",
+        {"account": account, "utxos": utxos,
+         "total_sats": coins_svc.unspent_total_sats(utxos),
+         "warnings": coins_svc.privacy_warnings(session, account_id),
+         "mempool_url": node_settings.get_config(session).mempool_url},
     )
 
 
