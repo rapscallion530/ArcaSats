@@ -1,0 +1,52 @@
+<div id="reconcile-list" class="space-y-4">
+  {% if suggestions %}
+  {% for s in suggestions %}
+  <div class="card bg-surface border border-line rounded-card p-5">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="text-sm">
+        {% set c = s.confidence %}
+        <span class="text-[10px] px-1.5 py-0.5 rounded-full
+                     {% if c == 'high' %}bg-surfaceblue text-gain{% elif c == 'medium' %}bg-surfaceblue text-headingalt{% else %}bg-surfaceblue text-muted{% endif %}">{{ c }} match</span>
+        <span class="text-muted ml-2">Δ {{ s.amount_delta_sats|btcamt }} <span class="unit">BTC</span>, {{ s.days_apart }} day(s) apart</span>
+      </div>
+    </div>
+
+    <div class="grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-center mt-3">
+      <!-- Outflow -->
+      <div class="rounded-[8px] border border-line p-3">
+        <div class="text-xs text-loss">Out · {{ s.out_tx.timestamp.strftime("%Y-%m-%d") }}</div>
+        <div class="text-heading tabular-nums">{{ s.out_tx.amount_sats|btcamt }} <span class="unit text-xs">BTC</span></div>
+        <div class="text-xs text-muted">{{ s.out_account }} · {{ labels.get(s.out_tx.kind, s.out_tx.kind) }}</div>
+      </div>
+      <div class="text-muted text-center">&rarr;</div>
+      <!-- Inflow -->
+      <div class="rounded-[8px] border border-line p-3">
+        <div class="text-xs text-gain">In · {{ s.in_tx.timestamp.strftime("%Y-%m-%d") }}</div>
+        <div class="text-heading tabular-nums">{{ s.in_tx.amount_sats|btcamt }} <span class="unit text-xs">BTC</span></div>
+        <div class="text-xs text-muted">{{ s.in_account }} · {{ labels.get(s.in_tx.kind, s.in_tx.kind) }}</div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3 mt-4">
+      <form hx-post="/reconcile/confirm" hx-target="#reconcile-list" hx-swap="outerHTML">
+        <input type="hidden" name="out_tx_id" value="{{ s.out_tx.id }}">
+        <input type="hidden" name="in_tx_id" value="{{ s.in_tx.id }}">
+        <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover"
+                title="Relabel both as a self-transfer and carry the cost basis across">Confirm self-transfer</button>
+      </form>
+      <form hx-post="/reconcile/reject" hx-target="#reconcile-list" hx-swap="outerHTML">
+        <input type="hidden" name="out_tx_id" value="{{ s.out_tx.id }}">
+        <input type="hidden" name="in_tx_id" value="{{ s.in_tx.id }}">
+        <button type="submit" class="text-sm text-muted hover:text-heading"
+                title="These are genuine external buy/sell — don't suggest again">Not a transfer</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="card bg-surface border border-dashed border-line rounded-card p-8 text-center text-muted">
+    Nothing to review. Candidate self-transfers (coins that left one wallet and reappeared in
+    another without a shared txid) will show up here for your confirmation.
+  </div>
+  {% endif %}
+</div>

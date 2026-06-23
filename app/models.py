@@ -148,6 +148,10 @@ class Transaction(Base):
     carried_basis_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     # If True, the user has opted this transfer_in OUT of basis carryover (use fresh basis).
     carry_disabled: Mapped[bool] = mapped_column(default=False)
+    # True once the user has adjudicated this row in the reconciliation inbox (confirmed it as a
+    # self-transfer, or rejected the suggestion as a genuine external buy/sell). Suppresses it
+    # from future transfer suggestions either way.
+    transfer_reviewed: Mapped[bool] = mapped_column(default=False)
 
     txid: Mapped[str | None] = mapped_column(String(80), nullable=True)
     address: Mapped[str | None] = mapped_column(String(120), nullable=True)

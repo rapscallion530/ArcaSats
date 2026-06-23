@@ -54,6 +54,7 @@ def _run_lightweight_migrations() -> None:
             "carried_basis_usd": "NUMERIC",
             "carry_disabled": "INTEGER DEFAULT 0",
             "fiat_source": "VARCHAR",
+            "transfer_reviewed": "INTEGER DEFAULT 0",
         },
         "accounts": {"owner": "VARCHAR DEFAULT ''", "lot_method": "VARCHAR DEFAULT 'fifo'"},
         "users": {"token_version": "INTEGER DEFAULT 0"},

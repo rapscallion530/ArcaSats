@@ -24,6 +24,7 @@ from app.routers import (
     assistant as assistant_router,
     auth as auth_router,
     dashboard,
+    reconcile as reconcile_router,
     settings as settings_router,
     tax,
 )
@@ -131,6 +132,7 @@ async def auth_middleware(request: Request, call_next):
 app.include_router(auth_router.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
+app.include_router(reconcile_router.router)
 app.include_router(tax.router)
 app.include_router(settings_router.router)
 app.include_router(assistant_router.router)

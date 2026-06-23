@@ -443,6 +443,146 @@ def reclassify_onchain_transfers(session: Session) -> int:
     return changed
 
 
+# --- Reconciliation inbox ----------------------------------------------------
+# Candidate self-transfers that share NO txid (coins that left one wallet and reappeared in
+# another through an address we don't track). These are SUGGESTIONS only — never auto-applied,
+# because on-chain we can't prove the intermediary is yours (see docs/utxo-tracking.md scope).
+_SUGGEST_WINDOW = dt.timedelta(days=7)          # an inflow within a week of the outflow
+_SUGGEST_AMOUNT_TOL_SATS = 200_000              # 0.002 BTC — a couple of hops' worth of fees
+_OUTFLOW_SUGGEST = (TxKind.SELL, TxKind.TRANSFER_OUT)
+_INFLOW_SUGGEST = (TxKind.BUY, TxKind.TRANSFER_IN)
+
+
+@dataclass
+class TransferSuggestion:
+    out_tx: Transaction
+    in_tx: Transaction
+    amount_delta_sats: int
+    days_apart: int
+    out_account: str = ""
+    in_account: str = ""
+
+    @property
+    def confidence(self) -> str:
+        if self.amount_delta_sats <= 10_000 and self.days_apart <= 1:
+            return "high"
+        if self.amount_delta_sats <= 100_000 and self.days_apart <= 3:
+            return "medium"
+        return "low"
+
+
+def suggest_transfers(session: Session, user_id: int | None = None,
+                      role: str | None = None) -> list[TransferSuggestion]:
+    """Propose same-owner outflow→inflow pairs that look like one self-transfer split across two
+    transactions with different txids. High precision over recall: one best inflow per outflow,
+    inside a tight amount+time window, excluding anything already proven (shared txid) or already
+    adjudicated (transfer_reviewed) or already carrying basis. The user confirms or rejects each.
+    """
+    accts = {a.id: a for a in session.scalars(select(Account)).all()}
+
+    def visible(account_id: int) -> bool:
+        a = accts.get(account_id)
+        if a is None:
+            return False
+        return user_id is None or role == "admin" or a.owner_user_id == user_id
+
+    owner_of = {aid: (a.owner_user_id, _norm_owner(a.owner)) for aid, a in accts.items()}
+    internal = internal_txids(session)
+    rows = session.scalars(
+        select(Transaction).where(Transaction.kind.in_(_OUTFLOW_SUGGEST + _INFLOW_SUGGEST))
+    ).all()
+
+    def eligible(t: Transaction) -> bool:
+        return (not t.transfer_reviewed and visible(t.account_id)
+                and not (t.txid and t.txid in internal))
+
+    outs = sorted([t for t in rows if t.kind in _OUTFLOW_SUGGEST and eligible(t)],
+                  key=lambda t: (t.timestamp, t.id or 0))
+    ins = [t for t in rows if t.kind in _INFLOW_SUGGEST and eligible(t) and t.carried_basis_usd is None]
+
+    used_in: set[int] = set()
+    out: list[TransferSuggestion] = []
+    for o in outs:
+        best, best_score = None, None
+        for i in ins:
+            if i.id in used_in or (o.account_id, o.wallet_id) == (i.account_id, i.wallet_id):
+                continue
+            if owner_of.get(o.account_id) != owner_of.get(i.account_id):
+                continue
+            if o.txid and i.txid and o.txid == i.txid:
+                continue  # shared txid -> handled by the auto reconciler, not a suggestion
+            if not (o.timestamp <= i.timestamp <= o.timestamp + _SUGGEST_WINDOW):
+                continue
+            delta = abs(o.amount_sats - i.amount_sats)
+            if delta > _SUGGEST_AMOUNT_TOL_SATS:
+                continue
+            score = (delta, i.timestamp - o.timestamp)
+            if best_score is None or score < best_score:
+                best, best_score = i, score
+        if best is not None:
+            used_in.add(best.id)
+            out.append(TransferSuggestion(
+                out_tx=o, in_tx=best, amount_delta_sats=abs(o.amount_sats - best.amount_sats),
+                days_apart=(best.timestamp - o.timestamp).days,
+                out_account=accts[o.account_id].name, in_account=accts[best.account_id].name))
+    out.sort(key=lambda s: (s.out_tx.timestamp, s.out_tx.id or 0))
+    return out
+
+
+def _same_owner(session: Session, a_id: int, b_id: int) -> bool:
+    a, b = session.get(Account, a_id), session.get(Account, b_id)
+    if a is None or b is None:
+        return False
+    return (a.owner_user_id, _norm_owner(a.owner)) == (b.owner_user_id, _norm_owner(b.owner))
+
+
+def _can_touch(session: Session, account_id: int, user_id: int | None, role: str | None) -> bool:
+    a = session.get(Account, account_id)
+    if a is None:
+        return False
+    return user_id is None or role == "admin" or a.owner_user_id == user_id
+
+
+def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int,
+                     user_id: int | None = None, role: str | None = None) -> tuple[bool, str]:
+    """Confirm a suggested pair: relabel both rows to transfer_out/transfer_in and carry the
+    source lot's basis onto the destination. Marks both reviewed so they leave the queue."""
+    o, i = session.get(Transaction, out_tx_id), session.get(Transaction, in_tx_id)
+    if o is None or i is None:
+        return False, "transaction not found"
+    if o.kind not in _OUTFLOW_SUGGEST or i.kind not in _INFLOW_SUGGEST:
+        return False, "not an outflow/inflow pair"
+    if not (_can_touch(session, o.account_id, user_id, role)
+            and _can_touch(session, i.account_id, user_id, role)):
+        return False, "not permitted"
+    if not _same_owner(session, o.account_id, i.account_id):
+        return False, "different owners — that's a gift/disposal, not a self-transfer"
+    o.kind, i.kind = TxKind.TRANSFER_OUT, TxKind.TRANSFER_IN
+    i.carry_disabled = False
+    o.transfer_reviewed = i.transfer_reviewed = True
+    session.commit()
+    # With the source row now a transfer_out, compute records the basis it consumed; carry it.
+    consumed = compute_account(session, o.account_id).transfer_out_basis.get(tx_key(o), Decimal("0"))
+    i.carried_basis_usd = consumed
+    session.commit()
+    return True, ""
+
+
+def reject_suggestion(session: Session, out_tx_id: int, in_tx_id: int,
+                      user_id: int | None = None, role: str | None = None) -> tuple[bool, str]:
+    """Reject a suggested pair: the rows are genuine external buy/sell, not a self-transfer.
+    Marks both reviewed so the pairing isn't proposed again."""
+    o, i = session.get(Transaction, out_tx_id), session.get(Transaction, in_tx_id)
+    if o is None or i is None:
+        return False, "transaction not found"
+    if not (_can_touch(session, o.account_id, user_id, role)
+            and _can_touch(session, i.account_id, user_id, role)):
+        return False, "not permitted"
+    o.transfer_reviewed = i.transfer_reviewed = True
+    session.commit()
+    return True, ""
+
+
 def reconcile_internal_transfers(session: Session, include_heuristic: bool = False) -> int:
     """Carry cost basis across same-owner self-transfers between accounts. First relabels any
     cross-wallet on-chain buy/sell pairs back to transfers. By default ONLY exact shared-txid

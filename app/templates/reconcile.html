@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Reconciliation inbox &middot; ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
+
+  <div>
+    <a href="/accounts" class="text-sm text-muted hover:text-heading">&larr; Accounts</a>
+    <h1 class="text-2xl text-heading mt-1">Reconciliation inbox</h1>
+    <p class="text-muted text-sm mt-1 max-w-2xl">
+      When coins leave one of your wallets and reappear in another through an address ArcaSats
+      doesn't track, the two on-chain transactions have <em>different</em> txids — so they can't
+      be linked automatically. These are <strong>suggestions</strong>, never auto-applied:
+      confirm a pair to relabel both as a self-transfer and carry the cost basis across, or
+      reject it if they're genuinely separate buy/sell events. Exact shared-txid transfers are
+      reconciled automatically and don't appear here.
+    </p>
+  </div>
+
+  {% include "partials/reconcile_list.html" %}
+
+</div>
+{% endblock %}

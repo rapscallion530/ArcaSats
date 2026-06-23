@@ -2,7 +2,8 @@
 
 **Status: BUILT (2026-06-17).** Standalone default shipped; per-wallet `onchain_mode`,
 cross-wallet transfer reclassification, direction-keyed dedupe + reclassification migration,
-and the mempool "explorer ↗" link are implemented and tested (110 tests).
+and the mempool "explorer ↗" link are implemented and tested. A **reconciliation inbox** for
+no-shared-txid self-transfers was added 2026-06-23 (see below).
 
 ## Problem
 
@@ -96,6 +97,28 @@ historical price at the tx time (hourly→daily). Caveats surfaced in the UI:
    estimate; verify before filing.
 8. Tests: standalone buy/sell labeling; cross-wallet transfer auto-detection & reclassify;
    re-sync idempotency after relabel; price backfill now fills the buys/sells.
+
+## Reconciliation inbox (BUILT 2026-06-23)
+
+The txid matcher only links a transfer when the **same txid** appears as both an out and an in.
+But coins that leave wallet A and reappear in wallet C *through an address ArcaSats doesn't
+track* are **two transactions with different txids** — there is no on-chain proof the coins are
+the same, and inferring that the intermediary is yours would be outward chain-analytics (out of
+scope) and could fabricate basis. So we never guess.
+
+Instead, `costbasis.suggest_transfers` proposes **candidate** pairs — one best inflow per
+outflow, same owner, tight amount (≤0.002 BTC) + time (≤7 days) window, excluding shared-txid
+(auto-handled) / already-carried / already-reviewed rows — and the user adjudicates each in the
+**Reconciliation inbox** (`/reconcile`, `app/routers/reconcile.py`):
+
+- **Confirm** (`confirm_transfer`): relabel both rows `transfer_out`/`transfer_in` and carry the
+  source lot's basis onto the destination. Suppresses the resurrected SELL/BUY taxable events.
+- **Reject** (`reject_suggestion`): genuine external buy/sell — leave kinds as-is.
+
+Either way both rows get `Transaction.transfer_reviewed=True` so the pairing isn't proposed
+again. Suggestions are never auto-applied. The clean fix for an *untracked-but-yours* hop is
+still to **load that wallet** (restores shared-txid proof on both legs); the inbox covers the
+case where you can't (a lone address, a CoinJoin, an exchange round-trip).
 
 ## Risk / honesty notes
 
