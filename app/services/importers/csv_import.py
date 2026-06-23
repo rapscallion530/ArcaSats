@@ -116,6 +116,31 @@ def _stable_id(source: str, n: NormalizedTx) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()[:24]
 
 
+# Column names that mark the real header row. Some exports (e.g. Swan) prefix the file with
+# banner lines (company name, phone) before the header; without skipping them csv.DictReader
+# treats the banner as the field names and drops every data row.
+_HEADER_VOCAB = {
+    "event", "type", "kind", "date", "timestamp", "time", "time (utc)", "created at",
+    "executed at", "transaction type", "transaction id", "bitcoin amount", "btc amount",
+    "unit count", "amount", "asset", "asset type", "quantity transacted",
+}
+
+
+def _strip_preamble(text: str) -> str:
+    """Drop leading banner lines, returning the text from the real header row onward. The header
+    is the first line with >=2 recognized column names — for a normal export that's line 0, so
+    this is a no-op; for a Swan export it skips the company/phone banner."""
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        try:
+            cells = next(csv.reader([line]))
+        except (StopIteration, csv.Error):
+            continue
+        if sum(1 for c in cells if (c or "").strip().lower() in _HEADER_VOCAB) >= 2:
+            return "".join(lines[i:])
+    return text
+
+
 # --- kind maps ---------------------------------------------------------------
 _GENERIC_KIND = {
     "buy": TxKind.BUY, "purchase": TxKind.BUY, "sell": TxKind.SELL, "sale": TxKind.SELL,
@@ -208,20 +233,65 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
 
 
 def parse_swan(rows: list[dict]) -> list[NormalizedTx]:
+    """Swan ships two unrelated exports. The transactions/transfers export has an `Event`
+    column; the on-chain withdrawals export has none (identify it by its own columns)."""
+    if not rows:
+        return []
+    cols = {(k or "").strip().lower() for k in rows[0].keys()}
+    if "bitcoin amount" in cols and "created at" in cols:
+        return _parse_swan_withdrawals(rows)
+    return _parse_swan_transactions(rows)
+
+
+def _parse_swan_transactions(rows: list[dict]) -> list[NormalizedTx]:
+    """Swan's transactions export: Event, Date, ..., Unit Count, Asset Type, BTC Price, ...
+    It interleaves BTC rows with USD rows (fiat funding deposits, monthly fees) — only the
+    BTC-asset rows are ledger events, so non-BTC rows are filtered out. (The older idealized
+    `BTC Amount`/`USD Amount` header with no Asset Type column still works: an absent Asset
+    Type is treated as BTC, and the amount/value fall through to the legacy column names.)"""
     out = []
     for row in rows:
         r = _norm_keys(row)
+        asset = _get(r, "asset type", "asset")
+        if asset and asset.upper() != "BTC":          # USD funding / fees -> not a BTC event
+            continue
         kind = _map_kind(_GENERIC_KIND, _get(r, "event", "type", "transaction type"))
         if not kind:
             continue
         out.append(NormalizedTx(
             kind=kind,
             timestamp=_dt(_get(r, "date", "timestamp", "time")),
-            amount_sats=_to_sats(_get(r, "btc amount", "btc", "amount btc", "amount")),
-            fiat_value=_usd(_get(r, "usd amount", "usd", "amount usd", "value")),
+            amount_sats=_to_sats(_get(r, "unit count", "btc amount", "amount btc", "amount", "btc")),
+            fiat_value=_usd(_get(r, "transaction usd", "total usd", "usd amount", "usd", "value")),
+            fiat_fee=_usd(_get(r, "fee usd", "fee")),
             price_usd=_usd(_get(r, "btc price", "price")),
             counterparty="Swan",
             external_id=_get(r, "transaction id", "id", "reference") or None,
+        ))
+    return out
+
+
+def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
+    """Swan's on-chain withdrawals export: Created At, Timezone, Transaction ID, Executed At,
+    Canceled At, Status, Bitcoin Amount, ... Every settled row is a transfer_out; canceled
+    rows (e.g. primetrust-canceled) never moved coins and are dropped. The Transaction ID is
+    the on-chain txid — carried into the `txid` field so a synced self-custody wallet's
+    matching transfer_in reconciles as an internal transfer (see costbasis.internal_txids)."""
+    out = []
+    for row in rows:
+        r = _norm_keys(row)
+        status = _get(r, "status").lower()
+        if status and status != "settled":            # only settled withdrawals actually executed
+            continue
+        txid = _get(r, "transaction id", "txid", "on-chain txid") or None
+        out.append(NormalizedTx(
+            kind=TxKind.TRANSFER_OUT,
+            # Executed/settled time is when coins left; fall back to creation time.
+            timestamp=_dt(_get(r, "executed at", "created at", "date", "timestamp")),
+            amount_sats=_to_sats(_get(r, "bitcoin amount", "btc amount", "amount", "btc")),
+            txid=txid,
+            counterparty="Swan",
+            external_id=txid,                          # None -> persist falls back to a stable hash
         ))
     return out
 
@@ -264,7 +334,7 @@ def import_csv(
         return result
 
     try:
-        reader = csv.DictReader(io.StringIO(text))
+        reader = csv.DictReader(io.StringIO(_strip_preamble(text)))
         rows = list(reader)
     except Exception as exc:  # noqa: BLE001
         result.errors.append(f"could not parse CSV: {exc}")

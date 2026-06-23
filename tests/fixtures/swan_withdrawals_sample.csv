@@ -1,0 +1,6 @@
+"Example Bitcoin Exchange LLC 123 Test St Anytown, CA 90000",,,,,,,,
+Phone: 10000000000,,,,,,,,
+Created At,Timezone,Transaction ID,Executed At,Canceled At,Status,Bitcoin Amount,Automatic,IP Address
+2023-01-15 12:00:00+00,UTC,aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888,2023-01-15 13:00:00+00,,settled,0.00500000,t,10.0.0.1
+2023-02-20 12:00:00+00,UTC,,,2023-02-22 00:00:00+00,primetrust-canceled,0.01000000,t,10.0.0.1
+2023-03-10 12:00:00+00,UTC,1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb,2023-03-10 13:30:00+00,,settled,0.00250000,f,10.0.0.2

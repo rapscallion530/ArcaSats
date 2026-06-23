@@ -24,6 +24,9 @@ data/
 *.db
 fixtures/real/
 
+# Local launchers / personal tooling (not for the public repo)
+open-claude-here.bat
+
 # Editor / OS
 .vscode/
 .idea/
