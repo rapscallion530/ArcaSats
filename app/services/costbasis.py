@@ -408,28 +408,33 @@ def find_transfer_matches(session: Session) -> list[tuple]:
 
 
 def reclassify_onchain_transfers(session: Session) -> int:
-    """Restore the "transfer" label on on-chain (xpub) rows whose counterparty is ANOTHER of
-    your loaded wallets — the only case where both sides are visible. A standalone wallet
-    imports external moves as buy/sell; when the SAME txid also appears in another same-owner
-    wallet (as the opposite direction), it's actually an internal transfer, so relabel both.
-    Single-wallet ledgers have no cross-wallet match and keep their buys/sells. Returns the
-    number of rows relabeled."""
+    """The "unless connected" half of the app-wide buy/sell-by-default rule: connect coins moving
+    between two of your OWN wallets and relabel both sides as a transfer.
+
+    Importers (and standalone xpub mode) record an ambiguous move as a TAXABLE buy/sell. Here, any
+    on-chain txid that appears as an outflow (sell/transfer_out) in one wallet AND an inflow
+    (buy/transfer_in) in ANOTHER wallet of the SAME owner is an internal self-transfer — relabel
+    both to transfer_out/transfer_in (so no phantom gain, and basis carries via the reconciler).
+    Source-agnostic: it connects a Strike/Swan CSV disposal to the xpub wallet that received it,
+    not just xpub-to-xpub. A move to a DIFFERENT owner is a gift (left as buy/sell). An outflow
+    with no matching same-owner inflow stays a sell. Returns the number of rows relabeled."""
     owner_of = {a.id: (a.owner_user_id, _norm_owner(a.owner)) for a in session.scalars(select(Account)).all()}
-    rows = session.scalars(
-        select(Transaction).where(Transaction.source.like("xpub:%"), Transaction.txid.is_not(None))
-    ).all()
+    rows = session.scalars(select(Transaction).where(
+        Transaction.txid.is_not(None),
+        Transaction.kind.in_((TxKind.BUY, TxKind.SELL, TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT)),
+    )).all()
     by_txid: dict[str, list] = defaultdict(list)
     for t in rows:
         by_txid[t.txid].append(t)
 
     changed = 0
     for group in by_txid.values():
-        outs = [t for t in group if (t.external_id or "").endswith(":out")]
-        ins = [t for t in group if (t.external_id or "").endswith(":in")]
+        outs = [t for t in group if t.kind in (TxKind.SELL, TxKind.TRANSFER_OUT)]
+        ins = [t for t in group if t.kind in (TxKind.BUY, TxKind.TRANSFER_IN)]
         for o in outs:
             for i in ins:
-                if o.wallet_id == i.wallet_id:
-                    continue
+                if (o.account_id, o.wallet_id) == (i.account_id, i.wallet_id):
+                    continue  # same wallet — not a cross-wallet transfer
                 if owner_of.get(o.account_id) != owner_of.get(i.account_id):
                     continue  # different owner = a gift, not an internal transfer
                 if o.kind != TxKind.TRANSFER_OUT:

@@ -6,6 +6,16 @@ Parsers live in `app/services/importers/csv_import.py`. Header matching is
 case-insensitive and tolerant of common variants. Bitcoin-only: non-BTC assets
 (e.g. Coinbase ETH rows) are ignored.
 
+### App-wide rule: default to buy/sell, never transfers
+A BTC movement defaults to a **taxable buy/sell** — coins leaving to (or arriving from) an
+unknown destination are a disposal/acquisition. A row only becomes a non-taxable **transfer**
+when it can be *connected* to another of your own wallets: an on-chain txid shared with a
+same-owner wallet auto-upgrades both sides (`costbasis.reclassify_onchain_transfers`, run by
+the reconciler on sync/import), or you confirm it in the reconciliation inbox. This is the
+conservative treatment (it never hides a disposal) and matches standalone xpub mode. Custodial
+exports (`_CUSTODIAL_KIND`) therefore never emit transfers; only the user-controlled `generic`
+format honors an **explicit** `transfer_in`/`transfer_out` (you asserting the self-transfer).
+
 | Source | Status | Notes |
 |---|---|---|
 | `coinbase` | Implemented vs. documented Coinbase "Transaction history" headers | Filters `Asset == BTC`. Uses *Total (inclusive of fees)* as fiat value. |
@@ -17,23 +27,24 @@ case-insensitive and tolerant of common variants. Bitcoin-only: non-BTC assets
 ### Swan exports (two formats, one source)
 Swan ships two unrelated CSVs, both prefixed with a company/phone **banner** the importer
 skips automatically (see `_strip_preamble`):
-- **Transactions** (`Event, Date, …, Unit Count, Asset Type, BTC Price, …`): `purchase` → buy,
-  BTC `deposit` → transfer-in. Non-BTC rows (USD funding deposits, `monthly_fee`) are filtered
-  out by `Asset Type`. BTC amount comes from `Unit Count`, fiat from `Transaction USD`.
+- **Transactions** (`Event, Date, …, Unit Count, Asset Type, BTC Price, …`): `purchase`/BTC
+  `deposit` → **buy** (per the app-wide default). Non-BTC rows (USD funding deposits,
+  `monthly_fee`) are filtered out by `Asset Type`. BTC amount comes from `Unit Count`, fiat from
+  `Transaction USD`.
 - **Withdrawals** (`Created At, Transaction ID, Executed At, …, Status, Bitcoin Amount, …`): has
-  no `Event` column — every `settled` row is a transfer-out; `*-canceled` rows are dropped. The
-  `Transaction ID` is the **on-chain txid**, stored on the transaction.
+  no `Event` column — every `settled` row is a **sell** by default; `*-canceled` rows are dropped.
+  The `Transaction ID` is the **on-chain txid**, stored on the transaction.
 
-**Reconciliation:** because the withdrawal's on-chain txid is captured, once you sync the
-receiving self-custody wallet (xpub) its matching `transfer_in` carries the same txid, and
-`costbasis.reconcile_internal_transfers` recognizes the pair as an internal self-transfer
-(same owner) and carries cost basis across — no manual linking needed.
+**Reconciliation:** because the withdrawal's on-chain txid is captured, once you load the
+receiving self-custody wallet (its xpub receive imports as a buy with the same txid), the
+reconciler connects the two, upgrades both to a transfer, and carries cost basis across — no
+manual linking needed.
 
 ### Strike (Annual Account Statement)
 Header: `Transaction ID, Time (UTC), Status, Transaction Type, Amount USD, Fee USD, Amount BTC,
-Fee BTC, Description, Exchange Rate, Transaction Hash`. `Purchase` → buy, `Send` → transfer-out;
-amount from `Amount BTC`, fiat from `Amount USD`, price from `Exchange Rate`, on-chain txid from
-`Transaction Hash`. **Only BTC rows are kept.** Strike is a dual USD+BTC account: a row with no
+Fee BTC, Description, Exchange Rate, Transaction Hash`. `Purchase`/`Receive` → buy, `Send`/`Sale`/
+`Withdrawal` → sell (the app-wide default); amount from `Amount BTC`, fiat from `Amount USD`,
+price from `Exchange Rate`, on-chain txid from `Transaction Hash`. **Only BTC rows are kept.** Strike is a dual USD+BTC account: a row with no
 `Amount BTC` is USD-account activity — bank `Deposit`/`Withdrawal`, or a USD `Send` that Strike
 instantly converts to BTC to settle a Lightning/on-chain invoice (BTC acquired + spent in the
 same instant ⇒ never held ⇒ no disposal of held BTC, ~zero gain). Skipping these is the *correct*

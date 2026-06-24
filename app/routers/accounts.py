@@ -368,6 +368,9 @@ async def import_csv_route(
         return _tx_table(request, session, account_id, import_result=result, import_source=source)
     text = raw.decode("utf-8-sig", errors="replace")
     result = csv_import.import_csv(session, account_id=account_id, source=source, text=text)
+    # Imported rows default to buy/sell; connect any that share a txid with one of your own
+    # wallets (e.g. a CSV withdrawal that landed in a loaded xpub) into transfers + carry basis.
+    costbasis.reconcile_internal_transfers(session)
     return _tx_table(request, session, account_id, import_result=result, import_source=source)
 
 

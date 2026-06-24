@@ -143,34 +143,42 @@ def _strip_preamble(text: str) -> str:
 
 
 # --- kind maps ---------------------------------------------------------------
+# App-wide rule: a BTC movement defaults to a TAXABLE buy/sell unless it can be connected to
+# another of your own wallets (shared on-chain txid), which upgrades it to a transfer during
+# reconciliation. So importers never emit transfers from ambiguous movement terms.
+#
+# Generic is the user-controlled canonical format, so it ALSO honors an EXPLICIT transfer_in/
+# transfer_out (the user asserting a self-transfer); only the ambiguous aliases
+# (deposit/receive/withdrawal/send) fall back to buy/sell.
 _GENERIC_KIND = {
     "buy": TxKind.BUY, "purchase": TxKind.BUY, "sell": TxKind.SELL, "sale": TxKind.SELL,
     "income": TxKind.INCOME, "reward": TxKind.INCOME, "rewards": TxKind.INCOME, "interest": TxKind.INCOME,
     "spend": TxKind.SPEND, "payment": TxKind.SPEND,
-    "transfer_in": TxKind.TRANSFER_IN, "deposit": TxKind.TRANSFER_IN, "receive": TxKind.TRANSFER_IN,
-    "transfer_out": TxKind.TRANSFER_OUT, "withdrawal": TxKind.TRANSFER_OUT, "send": TxKind.TRANSFER_OUT,
-    "withdraw": TxKind.TRANSFER_OUT, "fee": TxKind.FEE,
+    "transfer_in": TxKind.TRANSFER_IN, "transfer_out": TxKind.TRANSFER_OUT,   # explicit -> honored
+    "deposit": TxKind.BUY, "receive": TxKind.BUY,                             # ambiguous -> buy/sell
+    "withdrawal": TxKind.SELL, "send": TxKind.SELL, "withdraw": TxKind.SELL,
+    "fee": TxKind.FEE,
+}
+
+# Custodial-source default (Coinbase/Strike/Swan/Bisq): EVERY movement is a buy/sell — a custodial
+# export can't assert a self-transfer, so even "transfer_in"/"transfer_out" default to buy/sell.
+# The reconciler turns them into transfers when a shared txid connects two of your wallets.
+_CUSTODIAL_KIND = {
+    "buy": TxKind.BUY, "purchase": TxKind.BUY, "deposit": TxKind.BUY, "receive": TxKind.BUY,
+    "transfer_in": TxKind.BUY,
+    "sell": TxKind.SELL, "sale": TxKind.SELL, "withdrawal": TxKind.SELL, "withdraw": TxKind.SELL,
+    "send": TxKind.SELL, "transfer_out": TxKind.SELL,
+    "spend": TxKind.SPEND, "payment": TxKind.SPEND,
+    "income": TxKind.INCOME, "reward": TxKind.INCOME, "rewards": TxKind.INCOME, "interest": TxKind.INCOME,
 }
 
 _COINBASE_KIND = {
     "buy": TxKind.BUY, "advanced trade buy": TxKind.BUY, "advance trade buy": TxKind.BUY,
     "sell": TxKind.SELL, "advanced trade sell": TxKind.SELL,
-    "receive": TxKind.TRANSFER_IN, "send": TxKind.TRANSFER_OUT,
+    "receive": TxKind.BUY, "send": TxKind.SELL,   # default to buy/sell; reconciler upgrades to transfer
     "rewards income": TxKind.INCOME, "reward income": TxKind.INCOME, "staking income": TxKind.INCOME,
     "learning reward": TxKind.INCOME, "coinbase earn": TxKind.INCOME, "inflation reward": TxKind.INCOME,
     "convert": TxKind.SELL,
-}
-
-
-# Strike: a BTC row defaults to a TAXABLE buy/sell — the conservative treatment that never hides
-# a disposal. BTC leaving (Send/Sale/Withdrawal) is a disposal; BTC arriving (Purchase/Receive/
-# Deposit) an acquisition. The user downgrades a row to a non-taxable transfer ONLY when it
-# connects to one of their own loaded wallets (e.g. via the reconciliation inbox). This mirrors
-# the standalone xpub default (see docs/onchain-classification.md). USD-only rows are skipped
-# upstream by the no-BTC-amount filter, so these kinds only ever apply to BTC-bearing rows.
-_STRIKE_KIND = {
-    "purchase": TxKind.BUY, "receive": TxKind.BUY, "deposit": TxKind.BUY,
-    "sale": TxKind.SELL, "send": TxKind.SELL, "withdrawal": TxKind.SELL,
 }
 
 
@@ -250,7 +258,7 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
         status = _get(r, "status").lower()
         if status and status not in ("completed", "complete", "settled"):
             continue
-        kind = _map_kind(_STRIKE_KIND, _get(r, "transaction type", "type", "event"))
+        kind = _map_kind(_CUSTODIAL_KIND, _get(r, "transaction type", "type", "event"))
         if not kind:
             continue
         btc = _get(r, "amount btc", "amount (btc)", "btc", "amount")
@@ -287,14 +295,16 @@ def _parse_swan_transactions(rows: list[dict]) -> list[NormalizedTx]:
     It interleaves BTC rows with USD rows (fiat funding deposits, monthly fees) — only the
     BTC-asset rows are ledger events, so non-BTC rows are filtered out. (The older idealized
     `BTC Amount`/`USD Amount` header with no Asset Type column still works: an absent Asset
-    Type is treated as BTC, and the amount/value fall through to the legacy column names.)"""
+    Type is treated as BTC, and the amount/value fall through to the legacy column names.)
+    BTC rows default to buy/sell (purchase/deposit -> buy); the reconciler upgrades a row to a
+    transfer when a shared txid connects it to one of your own wallets."""
     out = []
     for row in rows:
         r = _norm_keys(row)
         asset = _get(r, "asset type", "asset")
         if asset and asset.upper() != "BTC":          # USD funding / fees -> not a BTC event
             continue
-        kind = _map_kind(_GENERIC_KIND, _get(r, "event", "type", "transaction type"))
+        kind = _map_kind(_CUSTODIAL_KIND, _get(r, "event", "type", "transaction type"))
         if not kind:
             continue
         out.append(NormalizedTx(
@@ -312,10 +322,10 @@ def _parse_swan_transactions(rows: list[dict]) -> list[NormalizedTx]:
 
 def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
     """Swan's on-chain withdrawals export: Created At, Timezone, Transaction ID, Executed At,
-    Canceled At, Status, Bitcoin Amount, ... Every settled row is a transfer_out; canceled
-    rows (e.g. primetrust-canceled) never moved coins and are dropped. The Transaction ID is
-    the on-chain txid — carried into the `txid` field so a synced self-custody wallet's
-    matching transfer_in reconciles as an internal transfer (see costbasis.internal_txids)."""
+    Canceled At, Status, Bitcoin Amount, ... Every settled row is a disposal (SELL by default);
+    canceled rows (e.g. primetrust-canceled) never moved coins and are dropped. The Transaction
+    ID is the on-chain txid — carried into the `txid` field so that when you load the receiving
+    self-custody wallet, the reconciler connects the two and upgrades this to a transfer."""
     out = []
     for row in rows:
         r = _norm_keys(row)
@@ -324,7 +334,7 @@ def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
             continue
         txid = _get(r, "transaction id", "txid", "on-chain txid") or None
         out.append(NormalizedTx(
-            kind=TxKind.TRANSFER_OUT,
+            kind=TxKind.SELL,
             # Executed/settled time is when coins left; fall back to creation time.
             timestamp=_dt(_get(r, "executed at", "created at", "date", "timestamp")),
             amount_sats=_to_sats(_get(r, "bitcoin amount", "btc amount", "amount", "btc")),
@@ -339,7 +349,7 @@ def parse_bisq(rows: list[dict]) -> list[NormalizedTx]:
     out = []
     for row in rows:
         r = _norm_keys(row)
-        kind = _map_kind(_GENERIC_KIND, _get(r, "type", "trade type", "direction"))
+        kind = _map_kind(_CUSTODIAL_KIND, _get(r, "type", "trade type", "direction"))
         if not kind:
             continue
         out.append(NormalizedTx(

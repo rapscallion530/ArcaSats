@@ -21,9 +21,10 @@ def test_coinbase_import_filters_non_btc_and_maps_kinds(session):
     assert r.imported == 5  # 6 rows, ETH row ignored
     txs = tx_svc.list_transactions(session, a.id)
     kinds = {t.kind for t in txs}
-    assert kinds == {TxKind.BUY, TxKind.INCOME, TxKind.SELL, TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT}
-    buy = next(t for t in txs if t.kind == TxKind.BUY)
-    assert buy.amount_sats == 1_000_000  # 0.01 BTC
+    # Receive/Send default to buy/sell (no transfers from a custodial export); the reconciler
+    # upgrades them to transfers only when a shared txid connects them to another of your wallets.
+    assert kinds == {TxKind.BUY, TxKind.INCOME, TxKind.SELL}
+    buy = next(t for t in txs if t.kind == TxKind.BUY and t.amount_sats == 1_000_000)
     assert str(buy.fiat_value) == "910.00"
 
 
@@ -117,38 +118,44 @@ def test_swan_transactions_real_format(session):
     # funding deposits and the monthly fee are non-BTC rows and must be filtered out.
     a, r = _import(session, "swan", "swan_transactions_sample.csv")
     assert r.errors == []
-    assert r.imported == 3                      # 2 purchases + 1 BTC custodial transfer-in
+    assert r.imported == 3                      # 2 purchases + 1 BTC deposit — all buys by default
     assert any("ignored" in m for m in r.rejected)   # USD deposit + monthly_fee dropped
     txs = tx_svc.list_transactions(session, a.id)
-    assert {t.kind for t in txs} == {TxKind.BUY, TxKind.TRANSFER_IN}
-    buy = next(t for t in txs if t.kind == TxKind.BUY)
-    assert buy.amount_sats == 200_000           # 0.00200000 BTC, from Unit Count
-    assert str(buy.fiat_value) == "100.00"      # from Transaction USD
+    assert {t.kind for t in txs} == {TxKind.BUY}   # custodial default; the BTC deposit is a buy, not a transfer
+    buy = next(t for t in txs if t.amount_sats == 200_000)
+    assert buy.kind == TxKind.BUY and str(buy.fiat_value) == "100.00"   # 0.002 BTC / Transaction USD
 
 
 def test_swan_withdrawals_format(session):
     # On-chain withdrawals export: no Event column; only settled rows count; on-chain txid kept.
+    # A withdrawal is a SELL by default (taxable) until connected to a loaded wallet.
     a, r = _import(session, "swan", "swan_withdrawals_sample.csv")
     assert r.errors == []
     assert r.imported == 2                       # 2 settled; the primetrust-canceled row dropped
     txs = tx_svc.list_transactions(session, a.id)
-    assert {t.kind for t in txs} == {TxKind.TRANSFER_OUT}
+    assert {t.kind for t in txs} == {TxKind.SELL}
     assert all(t.txid for t in txs)              # on-chain txid captured for reconciliation
 
 
-def test_swan_withdrawal_txid_enables_internal_transfer_reconcile(session):
+def test_swan_withdrawal_connects_to_wallet_as_transfer(session):
     from app.services import costbasis
-    # A Swan withdrawal (transfer_out) and a self-custody wallet's transfer_in sharing the same
-    # on-chain txid, under the same owner, must reconcile as an internal self-transfer.
+    import datetime as dt
+    # A Swan withdrawal imports as a SELL (taxable by default). When the receiving self-custody
+    # wallet is loaded (its xpub receive imports as a BUY with the same on-chain txid), the
+    # reconciler connects the two and upgrades BOTH to a non-taxable internal transfer.
     swan = acc.create_account(session, name="swan")
     csv_import.import_csv(session, account_id=swan.id, source="swan",
                           text=(FIX / "swan_withdrawals_sample.csv").read_text(encoding="utf-8"))
     txid = "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888"
+    swan_tx = next(t for t in tx_svc.list_transactions(session, swan.id) if t.txid == txid)
+    assert swan_tx.kind == TxKind.SELL           # taxable disposal by default
     cold = acc.create_account(session, name="cold-storage")
-    import datetime as dt
-    tx_svc.add_transaction(session, account_id=cold.id, kind=TxKind.TRANSFER_IN,
+    tx_svc.add_transaction(session, account_id=cold.id, kind=TxKind.BUY,
                            timestamp=dt.datetime(2023, 1, 15, 13, 0, 0), amount_sats=500_000,
                            txid=txid, source="xpub:1", external_id=f"{txid}:in")
+    costbasis.reclassify_onchain_transfers(session)
+    session.refresh(swan_tx)
+    assert swan_tx.kind == TxKind.TRANSFER_OUT   # connected -> upgraded to a transfer
     assert txid in costbasis.internal_txids(session)
 
 
