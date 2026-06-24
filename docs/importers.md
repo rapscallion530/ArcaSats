@@ -33,10 +33,14 @@ receiving self-custody wallet (xpub) its matching `transfer_in` carries the same
 Header: `Transaction ID, Time (UTC), Status, Transaction Type, Amount USD, Fee USD, Amount BTC,
 Fee BTC, Description, Exchange Rate, Transaction Hash`. `Purchase` → buy, `Send` → transfer-out;
 amount from `Amount BTC`, fiat from `Amount USD`, price from `Exchange Rate`, on-chain txid from
-`Transaction Hash`. **Only BTC rows are kept** — `Deposit`/`Withdrawal` are USD balance funding
-and many `Send`s are USD-denominated Lightning payments (the export omits their BTC size), so
-recording them would put a 0-BTC entry in the ledger; they're skipped (and reported as ignored).
-Non-`Completed` rows are skipped. Dates are month-name (`Oct 10 2022 22:41:09`), parsed by `_dt`.
+`Transaction Hash`. **Only BTC rows are kept.** Strike is a dual USD+BTC account: a row with no
+`Amount BTC` is USD-account activity — bank `Deposit`/`Withdrawal`, or a USD `Send` that Strike
+instantly converts to BTC to settle a Lightning/on-chain invoice (BTC acquired + spent in the
+same instant ⇒ never held ⇒ no disposal of held BTC, ~zero gain). Skipping these is the *correct*
+tax treatment, not a data workaround — do **not** derive a BTC size from the USD, as that would
+fabricate disposals that never happened. Only `Purchase` (basis) and BTC-denominated `Send` (BTC
+leaving the stack) are tax-relevant. Non-`Completed` rows are skipped. Dates are month-name
+(`Oct 10 2022 22:41:09`), parsed by `_dt`.
 
 ### ⚠️ Validate real headers
 The Bisq mapping was written without a real export to hand. Before trusting it, drop a

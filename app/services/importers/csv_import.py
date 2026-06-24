@@ -216,10 +216,15 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
     """Strike Annual Account Statement: Transaction ID, Time (UTC), Status, Transaction Type,
     Amount USD, Fee USD, Amount BTC, Fee BTC, Description, Exchange Rate, Transaction Hash.
 
-    The statement interleaves BTC rows (Purchase, on-chain Send) with USD-only rows: fiat
-    Deposit/Withdrawal (funding the USD balance) and USD-denominated Lightning Sends (whose BTC
-    size isn't in the export). USD-only rows are skipped — recording a 0-BTC ledger entry would
-    corrupt balances/basis. Pending/failed rows are skipped too. (The older idealized
+    Strike is a dual USD+BTC account. A row with NO Amount BTC is USD-account activity, not a
+    BTC tax event: fiat Deposit/Withdrawal (bank funding the USD balance), or a USD spend that
+    Strike instantly converts to BTC to settle a Lightning/on-chain invoice. In that conversion
+    the BTC is acquired and disposed in the same instant at the same price — never held — so
+    there is no disposal of held BTC and ~zero gain. We therefore skip rows with no BTC amount:
+    that's CORRECT treatment, not a data workaround. (Do NOT "fix" this by deriving a BTC size
+    from the USD — that would fabricate taxable disposals the user never had.) Only rows that
+    touch held BTC matter: Purchase (basis) and BTC-denominated Send (BTC leaving the stack).
+    Pending/failed rows are skipped too. (The older idealized
     `Time (UTC),Transaction Type,Amount BTC,Amount USD,BTC Price,Fee,Reference` header with a BTC
     amount on every row still imports unchanged.)"""
     out = []
