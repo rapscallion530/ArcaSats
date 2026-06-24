@@ -75,29 +75,36 @@ def test_strike_import(session):
     a, r = _import(session, "strike", "strike_sample.csv")
     assert r.imported == 3 and r.errors == []
     txs = tx_svc.list_transactions(session, a.id)
+    # BTC arriving/leaving defaults to a taxable buy/sell (never a transfer).
     assert any(t.kind == TxKind.BUY for t in txs)
-    assert any(t.kind == TxKind.TRANSFER_OUT for t in txs)
+    assert any(t.kind == TxKind.SELL for t in txs)
 
 
 def test_strike_statement_real_format(session):
     # Real Strike Annual Account Statement: month-name dates, the dual USD+BTC account (USD-only
-    # rows skipped), a pending row, a Reversed row, BTC Receive (held -> transfer_in), and an
-    # on-chain Send carrying a Transaction Hash.
+    # rows skipped), pending + Reversed rows skipped, a bill-pay Sale/Withdrawal pair, and BTC
+    # rows defaulting to taxable buy/sell (never transfers).
     a, r = _import(session, "strike", "strike_statement_sample.csv")
     assert r.errors == []
-    # Kept: 1 Purchase (BUY) + 1 BTC Send (transfer_out) + 1 BTC Receive (transfer_in).
-    assert r.imported == 3
-    assert any("ignored" in m for m in r.rejected)   # USD fiat/Lightning/USD-receive + pending + reversed
+    # Kept BTC rows: Purchase (buy) + BTC Send (sell) + BTC Receive (buy) + bill-pay Sale (sell).
+    assert r.imported == 4
+    assert any("ignored" in m for m in r.rejected)   # USD fiat/Lightning/USD-receive + pending + reversed + bill-pay withdrawal
     txs = tx_svc.list_transactions(session, a.id)
-    assert {t.kind for t in txs} == {TxKind.BUY, TxKind.TRANSFER_OUT, TxKind.TRANSFER_IN}
-    buy = next(t for t in txs if t.kind == TxKind.BUY)
-    assert buy.amount_sats == 500_000 and str(buy.fiat_value) == "100.00"
-    assert buy.timestamp.year == 2022           # month-name date parsed
-    send = next(t for t in txs if t.kind == TxKind.TRANSFER_OUT)
+    assert {t.kind for t in txs} == {TxKind.BUY, TxKind.SELL}   # no transfers by default
+
+    purchase = next(t for t in txs if t.amount_sats == 500_000)
+    assert purchase.kind == TxKind.BUY and str(purchase.fiat_value) == "100.00"
+    assert purchase.timestamp.year == 2022           # month-name date parsed
+    # BTC arriving defaults to a buy (not a transfer); USD-denominated Receive was skipped.
+    recv = next(t for t in txs if t.amount_sats == 3_000_000)
+    assert recv.kind == TxKind.BUY
+    # On-chain Send -> sell, with the Transaction Hash captured as txid.
+    send = next(t for t in txs if t.amount_sats == 200_000)
+    assert send.kind == TxKind.SELL
     assert send.txid == "bbbb1111cccc2222dddd3333eeee4444ffff5555aaaa6666bbbb7777cccc8888"
-    # BTC arriving and held -> transfer_in (the USD-denominated Receive was skipped as USD-account).
-    recv = next(t for t in txs if t.kind == TxKind.TRANSFER_IN)
-    assert recv.amount_sats == 3_000_000 and recv.fiat_value is None
+    # Bill-pay: the Sale is the BTC disposal (proceeds in USD); the paired Withdrawal was skipped.
+    sale = next(t for t in txs if t.amount_sats == 750_000)
+    assert sale.kind == TxKind.SELL and str(sale.fiat_value) == "639.97"
 
 
 def test_swan_import(session):

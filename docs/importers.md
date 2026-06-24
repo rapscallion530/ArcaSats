@@ -38,9 +38,16 @@ amount from `Amount BTC`, fiat from `Amount USD`, price from `Exchange Rate`, on
 instantly converts to BTC to settle a Lightning/on-chain invoice (BTC acquired + spent in the
 same instant ⇒ never held ⇒ no disposal of held BTC, ~zero gain). Skipping these is the *correct*
 tax treatment, not a data workaround — do **not** derive a BTC size from the USD, as that would
-fabricate disposals that never happened. Only `Purchase` (basis) and BTC-denominated `Send` (BTC
-leaving the stack) are tax-relevant. Non-`Completed` rows are skipped. Dates are month-name
-(`Oct 10 2022 22:41:09`), parsed by `_dt`.
+fabricate disposals that never happened.
+
+**BTC rows default to a taxable buy/sell, never a transfer** (`_STRIKE_KIND`): `Purchase`/
+`Receive` → buy, `Sale`/`Send` → sell. This is the conservative treatment — BTC leaving to /
+arriving from an unknown destination is a disposal/acquisition until the user downgrades it to a
+transfer by connecting it to one of their own wallets (reconciliation inbox / shared txid).
+**Bill pay** (2025+: pay a USD bill with BTC) is a `Sale` (the BTC disposal — kept, proceeds in
+`Amount USD`) paired with a `Withdrawal` (the USD to the biller — skipped), sharing one
+Transaction ID; only the Sale survives, so there's no dedup collision. Non-`Completed` rows
+(Pending/Reversed) are skipped. Dates are month-name (`Oct 10 2022 22:41:09`), parsed by `_dt`.
 
 ### ⚠️ Validate real headers
 The Bisq mapping was written without a real export to hand. Before trusting it, drop a

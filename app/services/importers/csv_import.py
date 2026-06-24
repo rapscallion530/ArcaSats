@@ -162,6 +162,18 @@ _COINBASE_KIND = {
 }
 
 
+# Strike: a BTC row defaults to a TAXABLE buy/sell — the conservative treatment that never hides
+# a disposal. BTC leaving (Send/Sale/Withdrawal) is a disposal; BTC arriving (Purchase/Receive/
+# Deposit) an acquisition. The user downgrades a row to a non-taxable transfer ONLY when it
+# connects to one of their own loaded wallets (e.g. via the reconciliation inbox). This mirrors
+# the standalone xpub default (see docs/onchain-classification.md). USD-only rows are skipped
+# upstream by the no-BTC-amount filter, so these kinds only ever apply to BTC-bearing rows.
+_STRIKE_KIND = {
+    "purchase": TxKind.BUY, "receive": TxKind.BUY, "deposit": TxKind.BUY,
+    "sale": TxKind.SELL, "send": TxKind.SELL, "withdrawal": TxKind.SELL,
+}
+
+
 def _map_kind(table: dict, raw: str) -> str | None:
     return table.get((raw or "").strip().lower())
 
@@ -226,14 +238,19 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
     touch held BTC matter: Purchase (basis) and BTC-denominated Send (BTC leaving the stack).
     Pending/failed rows are skipped too. (The older idealized
     `Time (UTC),Transaction Type,Amount BTC,Amount USD,BTC Price,Fee,Reference` header with a BTC
-    amount on every row still imports unchanged.)"""
+    amount on every row still imports unchanged.)
+
+    BTC rows default to a TAXABLE buy/sell (Purchase/Receive → buy, Sale/Send → sell), never a
+    transfer — coins leaving to / arriving from an unknown destination are a disposal/acquisition
+    until the user connects them to one of their own wallets. Bill-pay (pay a USD bill with BTC)
+    is a Sale (the BTC disposal, kept) + a Withdrawal (the USD to the biller, skipped)."""
     out = []
     for row in rows:
         r = _norm_keys(row)
         status = _get(r, "status").lower()
         if status and status not in ("completed", "complete", "settled"):
             continue
-        kind = _map_kind(_GENERIC_KIND, _get(r, "transaction type", "type", "event"))
+        kind = _map_kind(_STRIKE_KIND, _get(r, "transaction type", "type", "event"))
         if not kind:
             continue
         btc = _get(r, "amount btc", "amount (btc)", "btc", "amount")
