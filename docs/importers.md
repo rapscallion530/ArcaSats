@@ -18,7 +18,7 @@ format honors an **explicit** `transfer_in`/`transfer_out` (you asserting the se
 
 | Source | Status | Notes |
 |---|---|---|
-| `coinbase` | Implemented vs. documented Coinbase "Transaction history" headers | Filters `Asset == BTC`. Uses *Total (inclusive of fees)* as fiat value. |
+| `coinbase` | Validated against a real (sanitized) "Transaction history" export | Skips the 3-line preamble; `" UTC"` dates; `Convert`/Pro rows resolved by quantity sign; `($x)` negatives; fee-inclusive `Total` as basis/proceeds. Filters `Asset == BTC`. |
 | `strike` | Validated against a real (sanitized) Annual Account Statement | Handles month-name dates, USD-only fiat/Lightning rows, pending rows, and on-chain Send hashes. CSV is the reliable path (API is payments-oriented). |
 | `swan` | Validated against real (sanitized) exports | Handles **both** Swan exports under one `swan` source — auto-detected. Swan has no individual API → CSV only. |
 | `bisq` | Best-effort vs. plausible headers | Bisq v1/v2 local CSV export; no remote API. |
@@ -39,6 +39,21 @@ skips automatically (see `_strip_preamble`):
 receiving self-custody wallet (its xpub receive imports as a buy with the same txid), the
 reconciler connects the two, upgrades both to a transfer, and carries cost basis across — no
 manual linking needed.
+
+### Coinbase (Transaction history)
+Header (after a 3-line `Transactions` / `User,<name>,<id>` preamble that `_strip_preamble`
+skips): `ID, Timestamp, Transaction Type, Asset, Quantity Transacted, Price Currency, Price at
+Transaction, Subtotal, Total (inclusive of fees and/or spread), Fees and/or Spread, Notes, ...`.
+- Dates carry a `" UTC"` suffix (handled by `_dt`); negatives are accounting-style `"($84.63)"`
+  (handled by `_usd`).
+- `Buy`→buy, `Send`→sell. **`Convert`, `Pro Withdrawal`, `Pro Deposit`, and any unmapped type
+  resolve by the BTC quantity SIGN** — negative = sell, positive = buy (so a USDC→BTC convert is
+  a *buy*, BTC→USDC a *sell*). Income types (`Rewards Income`, etc.) stay income.
+- `Total (inclusive of fees and/or spread)` is the basis (buy) / net proceeds (sell) directly —
+  no separate fee is applied (it's already in the total). Non-BTC `Asset` rows ignored.
+- Note: Coinbase `Send` rows carry no on-chain txid in this export, so a send→self-custody can't
+  be auto-connected by shared txid — use the reconciliation inbox (amount+date) to mark it a
+  transfer.
 
 ### Strike (Annual Account Statement)
 Header: `Transaction ID, Time (UTC), Status, Transaction Type, Amount USD, Fee USD, Amount BTC,

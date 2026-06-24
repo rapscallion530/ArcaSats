@@ -1,0 +1,9 @@
+Transactions,,,,,,,,,,,,
+User,Test User,00000000-0000-0000-0000-000000000000,,,,,,,,,,
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes,Sender Address,Recipient Address
+id-0000000000000000000001,2022-02-12 19:10:57 UTC,Buy,BTC,0.00500000,USD,"$40,000.00 ",$200.00 ,$201.00 ,1.00,Bought 0.005 BTC,,
+id-0000000000000000000002,2022-03-02 11:23:36 UTC,Send,BTC,-0.00200000,USD,"$44,000.00 ",($88.00),($88.00),$0.00 ,Sent 0.002 BTC,,bc1qexampleaddressxxxxxxxxxxxxxxxxxxxxx0
+id-0000000000000000000003,2022-02-12 19:11:51 UTC,Convert,BTC,-0.00100000,USD,"$42,000.00 ",$42.00 ,$42.00 ,$0.00 ,Converted 0.001 BTC to 42 USDC,,
+id-0000000000000000000004,2022-04-26 22:53:57 UTC,Convert,BTC,0.00150000,USD,"$38,000.00 ",$57.00 ,$57.00 ,$0.00 ,Converted 57 USDC to 0.0015 BTC,,
+id-0000000000000000000005,2022-11-30 12:19:33 UTC,Pro Withdrawal,BTC,0,USD,"$16,000.00 ",$0.00 ,$0.00 ,$0.00 ,,,
+id-0000000000000000000006,2022-01-05 12:00:00 UTC,Buy,ETH,1.00000000,USD,"$3,000.00 ",$3000.00 ,$3000.00 ,$0.00 ,Not BTC,,

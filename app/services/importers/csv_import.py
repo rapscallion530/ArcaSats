@@ -71,7 +71,9 @@ def _to_sats(s: str) -> int:
 def _usd(s: str) -> Decimal | None:
     if not s:
         return None
-    s = s.replace("$", "").replace(",", "").replace("USD", "").strip()
+    # Strip currency noise and accounting-style parens (Coinbase writes negatives as "($84.63)").
+    s = (s.replace("$", "").replace(",", "").replace("USD", "")
+         .replace("(", "").replace(")", "").strip())
     if s in ("", "-"):
         return None
     try:
@@ -101,7 +103,10 @@ def _dt(s: str) -> dt.datetime | None:
         return to_naive_utc(dt.datetime.fromisoformat(s.replace("Z", "+00:00")))
     except ValueError:
         pass
-    bare = s.replace("Z", "")
+    bare = s.replace("Z", "").strip()
+    for suffix in (" UTC", " GMT"):           # Coinbase: "2022-03-02 11:23:36 UTC"
+        if bare.endswith(suffix):
+            bare = bare[: -len(suffix)].strip()
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M",
                 "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y", "%Y-%m-%d",
                 "%b %d %Y %H:%M:%S", "%b %d %Y", "%d %b %Y %H:%M:%S"):  # Strike: "Oct 10 2022 22:41:09"
@@ -178,7 +183,8 @@ _COINBASE_KIND = {
     "receive": TxKind.BUY, "send": TxKind.SELL,   # default to buy/sell; reconciler upgrades to transfer
     "rewards income": TxKind.INCOME, "reward income": TxKind.INCOME, "staking income": TxKind.INCOME,
     "learning reward": TxKind.INCOME, "coinbase earn": TxKind.INCOME, "inflation reward": TxKind.INCOME,
-    "convert": TxKind.SELL,
+    # "convert" / "pro withdrawal" / "pro deposit" are direction-ambiguous -> resolved by the
+    # BTC quantity sign in parse_coinbase, not mapped here.
 }
 
 
@@ -210,22 +216,31 @@ def parse_generic(rows: list[dict]) -> list[NormalizedTx]:
 
 
 def parse_coinbase(rows: list[dict]) -> list[NormalizedTx]:
+    """Coinbase "Transaction history" export. The 3-line preamble (Transactions / User,name,id)
+    is skipped by _strip_preamble. Timestamps carry a " UTC" suffix; negatives are accounting-
+    style "($84.63)". Only BTC rows are kept."""
     out = []
     for row in rows:
         r = _norm_keys(row)
         asset = _get(r, "asset", "currency").upper()
         if asset and asset != "BTC":
             continue
-        kind = _map_kind(_COINBASE_KIND, _get(r, "transaction type", "type"))
-        if not kind:
-            continue
+        raw_type = _get(r, "transaction type", "type")
+        qty = _get(r, "quantity transacted", "quantity", "amount")
+        kind = _map_kind(_COINBASE_KIND, raw_type)
+        # Convert (BTC<->stablecoin), Pro deposits/withdrawals, and any unmapped movement resolve
+        # to buy/sell by the BTC quantity SIGN (negative = disposal, positive = acquisition) — the
+        # app-wide default. A USDC->BTC convert is a BUY; BTC->USDC a SELL.
+        if kind is None or raw_type.strip().lower() in ("convert", "pro withdrawal", "pro deposit"):
+            kind = TxKind.SELL if qty.strip().startswith("-") else TxKind.BUY
         out.append(NormalizedTx(
             kind=kind,
             timestamp=_dt(_get(r, "timestamp", "date")),
-            amount_sats=_to_sats(_get(r, "quantity transacted", "quantity", "amount")),
+            amount_sats=_to_sats(qty),
+            # Total is INCLUSIVE of fees/spread — it IS the basis (buy) / net proceeds (sell)
+            # directly, so don't also pass a separate fee (that would double-count it).
             fiat_value=_usd(_get(r, "total (inclusive of fees and/or spread)", "total", "subtotal")),
-            fiat_fee=_usd(_get(r, "fees and/or spread", "fees", "fee")),
-            price_usd=_usd(_get(r, "spot price at transaction", "spot price", "price")),
+            price_usd=_usd(_get(r, "price at transaction", "spot price at transaction", "spot price", "price")),
             counterparty="Coinbase",
             note=_get(r, "notes", "note"),
         ))

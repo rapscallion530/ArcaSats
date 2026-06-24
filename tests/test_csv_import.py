@@ -28,6 +28,24 @@ def test_coinbase_import_filters_non_btc_and_maps_kinds(session):
     assert str(buy.fiat_value) == "910.00"
 
 
+def test_coinbase_statement_real_format(session):
+    # Real Coinbase "Transaction history": 3-line preamble, " UTC" dates, accounting-style
+    # negatives "($88.00)", and Convert resolved by BTC quantity sign.
+    a, r = _import(session, "coinbase", "coinbase_statement_sample.csv")
+    assert r.errors == []
+    assert r.imported == 4    # Buy + Send(sell) + Convert-out(sell) + Convert-in(buy); ETH + zero Pro Withdrawal dropped
+    txs = tx_svc.list_transactions(session, a.id)
+    assert {t.kind for t in txs} == {TxKind.BUY, TxKind.SELL}
+    buy = next(t for t in txs if t.amount_sats == 500_000)
+    assert buy.kind == TxKind.BUY and str(buy.fiat_value) == "201.00"   # Total (fee-inclusive)
+    assert buy.timestamp.year == 2022                                   # " UTC" suffix parsed
+    send = next(t for t in txs if t.amount_sats == 200_000)
+    assert send.kind == TxKind.SELL and str(send.fiat_value) == "88.00"   # "($88.00)" parsed
+    # USDC -> BTC Convert is an acquisition (positive quantity) -> buy, not sell.
+    convert_in = next(t for t in txs if t.amount_sats == 150_000)
+    assert convert_in.kind == TxKind.BUY
+
+
 def test_bad_rows_are_rejected_not_silently_coerced(session):
     a = acc.create_account(session, name="acct-reject")
     text = ("type,date,amount_btc,usd_value\n"
