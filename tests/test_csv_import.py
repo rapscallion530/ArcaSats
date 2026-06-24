@@ -79,6 +79,22 @@ def test_strike_import(session):
     assert any(t.kind == TxKind.TRANSFER_OUT for t in txs)
 
 
+def test_strike_statement_real_format(session):
+    # Real Strike Annual Account Statement: "Oct 10 2022 22:41:09" dates, USD-only fiat rows,
+    # a pending row, and an on-chain Send carrying a Transaction Hash.
+    a, r = _import(session, "strike", "strike_statement_sample.csv")
+    assert r.errors == []
+    assert r.imported == 2                      # 1 Purchase (BUY) + 1 on-chain Send (transfer_out)
+    assert any("ignored" in m for m in r.rejected)   # 2 USD fiat rows + 1 Lightning send + 1 pending
+    txs = tx_svc.list_transactions(session, a.id)
+    assert {t.kind for t in txs} == {TxKind.BUY, TxKind.TRANSFER_OUT}
+    buy = next(t for t in txs if t.kind == TxKind.BUY)
+    assert buy.amount_sats == 500_000 and str(buy.fiat_value) == "100.00"
+    assert buy.timestamp.year == 2022           # month-name date parsed
+    send = next(t for t in txs if t.kind == TxKind.TRANSFER_OUT)
+    assert send.txid == "bbbb1111cccc2222dddd3333eeee4444ffff5555aaaa6666bbbb7777cccc8888"
+
+
 def test_swan_import(session):
     a, r = _import(session, "swan", "swan_sample.csv")
     assert r.imported == 3 and r.errors == []

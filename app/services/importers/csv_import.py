@@ -103,7 +103,8 @@ def _dt(s: str) -> dt.datetime | None:
         pass
     bare = s.replace("Z", "")
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M",
-                "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y", "%Y-%m-%d"):
+                "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y", "%Y-%m-%d",
+                "%b %d %Y %H:%M:%S", "%b %d %Y", "%d %b %Y %H:%M:%S"):  # Strike: "Oct 10 2022 22:41:09"
         try:
             return dt.datetime.strptime(bare, fmt)  # naive => already UTC by convention
         except ValueError:
@@ -212,22 +213,38 @@ def parse_coinbase(rows: list[dict]) -> list[NormalizedTx]:
 
 
 def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
+    """Strike Annual Account Statement: Transaction ID, Time (UTC), Status, Transaction Type,
+    Amount USD, Fee USD, Amount BTC, Fee BTC, Description, Exchange Rate, Transaction Hash.
+
+    The statement interleaves BTC rows (Purchase, on-chain Send) with USD-only rows: fiat
+    Deposit/Withdrawal (funding the USD balance) and USD-denominated Lightning Sends (whose BTC
+    size isn't in the export). USD-only rows are skipped — recording a 0-BTC ledger entry would
+    corrupt balances/basis. Pending/failed rows are skipped too. (The older idealized
+    `Time (UTC),Transaction Type,Amount BTC,Amount USD,BTC Price,Fee,Reference` header with a BTC
+    amount on every row still imports unchanged.)"""
     out = []
     for row in rows:
         r = _norm_keys(row)
+        status = _get(r, "status").lower()
+        if status and status not in ("completed", "complete", "settled"):
+            continue
         kind = _map_kind(_GENERIC_KIND, _get(r, "transaction type", "type", "event"))
         if not kind:
+            continue
+        btc = _get(r, "amount btc", "amount (btc)", "btc", "amount")
+        if _to_sats(btc) == 0:                          # USD-only (fiat funding / Lightning) -> not a BTC event
             continue
         out.append(NormalizedTx(
             kind=kind,
             timestamp=_dt(_get(r, "time (utc)", "time", "date", "timestamp")),
-            amount_sats=_to_sats(_get(r, "amount btc", "btc", "amount (btc)", "amount")),
+            amount_sats=_to_sats(btc),
             fiat_value=_usd(_get(r, "amount usd", "usd", "amount (usd)", "value")),
-            price_usd=_usd(_get(r, "btc price", "price")),
-            fiat_fee=_usd(_get(r, "fee", "fees")),
-            txid=_get(r, "txid", "on-chain txid", "destination") or None,
+            fee_sats=_to_sats(_get(r, "fee btc")),
+            fiat_fee=_usd(_get(r, "fee usd", "fee", "fees")),
+            price_usd=_usd(_get(r, "exchange rate", "btc price", "price")),
+            txid=_get(r, "transaction hash", "txid", "on-chain txid", "destination") or None,
             counterparty="Strike",
-            external_id=_get(r, "reference", "id", "transaction id") or None,
+            external_id=_get(r, "transaction id", "reference", "id") or None,
         ))
     return out
 

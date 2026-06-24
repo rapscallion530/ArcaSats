@@ -9,7 +9,7 @@ case-insensitive and tolerant of common variants. Bitcoin-only: non-BTC assets
 | Source | Status | Notes |
 |---|---|---|
 | `coinbase` | Implemented vs. documented Coinbase "Transaction history" headers | Filters `Asset == BTC`. Uses *Total (inclusive of fees)* as fiat value. |
-| `strike` | Best-effort vs. plausible headers | **Verify against a real (redacted) Strike export.** CSV is the reliable path (API is payments-oriented). |
+| `strike` | Validated against a real (sanitized) Annual Account Statement | Handles month-name dates, USD-only fiat/Lightning rows, pending rows, and on-chain Send hashes. CSV is the reliable path (API is payments-oriented). |
 | `swan` | Validated against real (sanitized) exports | Handles **both** Swan exports under one `swan` source — auto-detected. Swan has no individual API → CSV only. |
 | `bisq` | Best-effort vs. plausible headers | Bisq v1/v2 local CSV export; no remote API. |
 | `generic` | Canonical format, always supported | Columns: `date,type,amount_btc,usd_value,fee_btc,txid,external_id,counterparty,note`. |
@@ -29,9 +29,18 @@ receiving self-custody wallet (xpub) its matching `transfer_in` carries the same
 `costbasis.reconcile_internal_transfers` recognizes the pair as an internal self-transfer
 (same owner) and carries cost basis across — no manual linking needed.
 
+### Strike (Annual Account Statement)
+Header: `Transaction ID, Time (UTC), Status, Transaction Type, Amount USD, Fee USD, Amount BTC,
+Fee BTC, Description, Exchange Rate, Transaction Hash`. `Purchase` → buy, `Send` → transfer-out;
+amount from `Amount BTC`, fiat from `Amount USD`, price from `Exchange Rate`, on-chain txid from
+`Transaction Hash`. **Only BTC rows are kept** — `Deposit`/`Withdrawal` are USD balance funding
+and many `Send`s are USD-denominated Lightning payments (the export omits their BTC size), so
+recording them would put a 0-BTC entry in the ledger; they're skipped (and reported as ignored).
+Non-`Completed` rows are skipped. Dates are month-name (`Oct 10 2022 22:41:09`), parsed by `_dt`.
+
 ### ⚠️ Validate real headers
-The Strike/Bisq mappings were written without a real export to hand. Before trusting them, drop
-a **redacted** sample (headers + 1-2 fake rows) and the mapping will be confirmed/adjusted. The
+The Bisq mapping was written without a real export to hand. Before trusting it, drop a
+**redacted** sample (headers + 1-2 fake rows) and the mapping will be confirmed/adjusted. The
 `generic` format is a guaranteed fallback for any source.
 
 ### Kind mapping
