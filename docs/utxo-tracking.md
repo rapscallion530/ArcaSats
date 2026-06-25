@@ -56,12 +56,16 @@ KYC-ness is an **acquisition** property, so it lives on the lot, not the UTXO (t
 custodial omnibus sources with no output-level visibility). See `app/services/costbasis.py`:
 
 - **Layer A — KYC on the lot.** The acquiring account's `label_kind` is snapshotted onto each
-  buy/income/opening (`Transaction.kyc_origin`, mirroring `Utxo.label_kind`). A self-transfer
-  carries provenance by storing the consumed **source-lot fragments** as JSON on the destination
-  `transfer_in` (`Transaction.carried_lots`); `compute()` rebuilds the destination lots from
-  those fragments, preserving each one's **original acquisition date** (holding period tacks,
-  IRC §1223) and its own KYC label. `CostBasisResult.holding_by_kyc` / `realized_by_kyc` (and the
-  8949 / assistant snapshot) report holdings + gains by class.
+  buy/income/opening (`Transaction.kyc_origin`, mirroring `Utxo.label_kind`). A **shared-txid**
+  self-transfer carries provenance by storing the consumed **source-lot fragments** as JSON on the
+  destination `transfer_in` (`Transaction.carried_lots`); `compute()` rebuilds the destination lots
+  from those fragments, preserving each one's **original acquisition date** (holding period tacks,
+  IRC §1223) and its own KYC label. A **fuzzy** amount+date / fee-skimmed link is not
+  fragment-carried — a hop through an intermediary we can't prove is yours is a final break of
+  ownership (by default no carry; an opt-in heuristic or an inbox confirmation still carries the
+  basis coarsely as one lot, without tacking the holding period).
+  `CostBasisResult.holding_by_kyc` / `realized_by_kyc` (and the 8949 / assistant snapshot) report
+  holdings + gains by class.
 - **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
   (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
   account's FIFO/LIFO/HIFO ordering applies. Specific identification **by class**, no UTXO link

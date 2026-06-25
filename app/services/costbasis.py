@@ -261,48 +261,35 @@ def _select_index(lots: list[Lot], method: str, priority: str = "none") -> int:
 def _carried_fragment_lots(tx: Transaction) -> list[Lot] | None:
     """Rebuild a transfer_in's destination lots from the source fragments the reconciler stored
     in `carried_lots`. Each fragment keeps its ORIGINAL acquisition date (so the holding period
-    tacks across a self-transfer, IRC §1223) and its own KYC label. Returns None when there are
-    no usable fragments (caller falls back to the single carried_basis_usd lot) or the user opted
-    this transfer out of carryover."""
+    tacks across a self-transfer, IRC §1223) and its own KYC label.
+
+    Fragments are only written for PROVEN shared-txid self-transfers, and we additionally require
+    that the destination received exactly what the source sent (the sats tie out). If they don't —
+    a fuzzy amount+date / fee-skimmed link, i.e. a hop through an intermediary we can't prove is
+    yours — there are no fragments and this returns None: the coarse single carried_basis_usd lot
+    is used instead, and by default such a hop is a final break of ownership (no carry at all).
+    Also returns None when the user opted this transfer out of carryover."""
     if tx.kind != TxKind.TRANSFER_IN or tx.carry_disabled or not tx.carried_lots:
         return None
     try:
         frags = json.loads(tx.carried_lots)
     except (ValueError, TypeError):
         return None
-    parsed = []
+    out: list[Lot] = []
     for f in sorted(frags, key=lambda fr: fr.get("acquired", "")):
         sats = int(f.get("sats", 0))
         if sats <= 0:
             continue
-        parsed.append((dt.datetime.fromisoformat(f["acquired"]), sats,
-                       Decimal(str(f.get("basis", "0"))), f.get("kyc", "") or ""))
-    if not parsed:
+        out.append(Lot(
+            acquired=dt.datetime.fromisoformat(f["acquired"]),
+            sats=sats,
+            basis_usd=Decimal(str(f.get("basis", "0"))),
+            source=tx.source,
+            kyc_origin=f.get("kyc", "") or "",
+        ))
+    if not out or sum(lot.sats for lot in out) != tx.amount_sats:
         return None
-
-    # The fragments sum to the SOURCE outflow; the destination may have received slightly less
-    # (a network fee skimmed in transit on a heuristic amount+date match). Scale the sats to what
-    # was actually received while preserving each fragment's basis (the fee doesn't change basis),
-    # so holdings stay exact instead of overstated. Shared-txid matches have equal amounts → no
-    # scaling, byte-identical to the unscaled fragments.
-    frag_total = sum(p[1] for p in parsed)
-    target = tx.amount_sats
-    scale = target > 0 and frag_total > 0 and target != frag_total
-    out: list[Lot] = []
-    used = 0
-    pending_basis = Decimal("0")  # basis from any fragment that scaled to 0 sats — never dropped
-    for i, (acquired, sats, basis, kyc) in enumerate(parsed):
-        n_sats = sats if not scale else (target - used if i == len(parsed) - 1 else sats * target // frag_total)
-        if n_sats <= 0:
-            pending_basis += basis
-            continue
-        out.append(Lot(acquired=acquired, sats=int(n_sats), basis_usd=basis + pending_basis,
-                       source=tx.source, kyc_origin=kyc))
-        pending_basis = Decimal("0")
-        used += int(n_sats)
-    if pending_basis and out:  # trailing fragment(s) scaled out — fold their basis into the last lot
-        out[-1].basis_usd += pending_basis
-    return out or None
+    return out
 
 
 def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
@@ -724,12 +711,13 @@ def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int) -> tuple[b
     i.carry_disabled = False
     o.transfer_reviewed = i.transfer_reviewed = True
     session.commit()
-    # With the source row now a transfer_out, compute records the basis + lot fragments it
-    # consumed; carry both (fragments preserve original acquisition dates + KYC labels).
+    # With the source row now a transfer_out, compute records the basis it consumed; carry it.
+    # An inbox match is a no-shared-txid (fuzzy) link the user vouched for, so we carry the basis
+    # coarsely as a single lot (carried_basis_usd) — NOT the precise fragment rebuild, which is
+    # reserved for shared-txid-proven self-transfers.
     src = compute_account(session, o.account_id)
-    key = tx_key(o)
-    i.carried_basis_usd = src.transfer_out_basis.get(key, Decimal("0"))
-    i.carried_lots = _fragments_json(src.transfer_out_lots.get(key, []))
+    i.carried_basis_usd = src.transfer_out_basis.get(tx_key(o), Decimal("0"))
+    i.carried_lots = None
     session.commit()
     return True, ""
 
@@ -764,7 +752,11 @@ def reconcile_internal_transfers(session: Session, include_heuristic: bool = Fal
         src = src_cache[out_tx.account_id]
         key = tx_key(out_tx)
         consumed = src.transfer_out_basis.get(key, Decimal("0"))
-        frags_json = _fragments_json(src.transfer_out_lots.get(key, []))
+        # Fragment-rebuild carry (original dates + per-fragment KYC) only for PROVEN shared-txid
+        # matches. A heuristic amount+date link is treated coarsely (single carried_basis_usd lot),
+        # since a hop through an intermediary we can't prove is yours shouldn't tack the holding
+        # period or split provenance.
+        frags_json = _fragments_json(src.transfer_out_lots.get(key, [])) if kind == "txid" else None
         if in_tx.carried_basis_usd != consumed or in_tx.carried_lots != frags_json:
             in_tx.carried_basis_usd = consumed
             in_tx.carried_lots = frags_json

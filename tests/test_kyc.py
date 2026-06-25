@@ -133,26 +133,38 @@ def test_merge_kyc_conservative():
     assert costbasis._merge_kyc(["", ""]) == ""
 
 
-def test_fragment_carry_scales_to_received_amount(session):
-    """A heuristic (amount+date) carry where a fee was skimmed in transit: holdings reflect the
-    RECEIVED sats (not the larger outflow), while the full basis still carries."""
+def test_fuzzy_amount_mismatch_does_not_fragment_carry(session):
+    """A fuzzy (amount+date / fee-skimmed) link is NOT a shared-txid proof, so it does not get the
+    fragment rebuild — no holding-period tacking, no per-fragment KYC split. Opting into the
+    heuristic still carries the basis coarsely (single lot); by default the hop is a clean break."""
     ex = acc.create_account(session, name="Ex", label_kind="KYC")
     cold = acc.create_account(session, name="Cold")
     out_amt = int(Decimal("0.2") * BTC)
-    in_amt = out_amt - 5000  # network fee
+    in_amt = out_amt - 5000  # network fee skimmed in transit -> amounts don't tie out
     txsvc.add_transaction(session, account_id=ex.id, kind=TxKind.BUY,
-                          timestamp=dt.datetime(2025, 1, 1), amount_sats=out_amt,
+                          timestamp=dt.datetime(2024, 1, 1), amount_sats=out_amt,
                           fiat_value=Decimal("18000"))
     txsvc.add_transaction(session, account_id=ex.id, kind=TxKind.TRANSFER_OUT,
-                          timestamp=dt.datetime(2025, 2, 1, 10), amount_sats=out_amt)
-    txsvc.add_transaction(session, account_id=cold.id, kind=TxKind.TRANSFER_IN,
-                          timestamp=dt.datetime(2025, 2, 1, 12), amount_sats=in_amt,
-                          txid="dep", external_id="dep:in")
+                          timestamp=dt.datetime(2024, 6, 1, 10), amount_sats=out_amt)
+    in_tx = txsvc.add_transaction(session, account_id=cold.id, kind=TxKind.TRANSFER_IN,
+                                  timestamp=dt.datetime(2024, 6, 1, 12), amount_sats=in_amt,
+                                  txid="dep", external_id="dep:in")
+    # Default reconcile (shared-txid only) does NOT touch a fuzzy match -> a break (no carry).
+    assert costbasis.reconcile_internal_transfers(session) == 0
+    assert costbasis.compute_account(session, cold.id).holding_basis_usd == Decimal("0.00")
+    # Opting into the heuristic carries the basis coarsely (single lot), with NO fragments.
     assert costbasis.reconcile_internal_transfers(session, include_heuristic=True) == 1
+    session.refresh(in_tx)
+    assert in_tx.carried_lots is None
     rc = costbasis.compute_account(session, cold.id)
-    assert rc.holding_sats == in_amt                    # received amount, not the 0.2 outflow
-    assert rc.holding_basis_usd == Decimal("18000.00")  # full basis still carried
-    assert rc.holding_by_kyc["KYC"]["sats"] == in_amt
+    assert rc.holding_sats == in_amt
+    assert rc.holding_basis_usd == Decimal("18000.00")
+    # Coarse single-lot carry dates the lot at the transfer, so a sale <1yr later is short-term
+    # (no holding-period tacking for an unproven hop).
+    txsvc.add_transaction(session, account_id=cold.id, kind=TxKind.SELL,
+                          timestamp=dt.datetime(2024, 9, 1), amount_sats=in_amt,
+                          fiat_value=Decimal("25000"))
+    assert costbasis.compute_account(session, cold.id).disposals[0].term == "short"
 
 
 def test_carry_disabled_skips_fragments():

@@ -17,12 +17,16 @@ egress behavior change. (Migration `0003_kyc_origin`; 156 tests.)
   account re-snapshots its existing direct acquisitions. `Lot`/`Disposal` carry the label and
   `CostBasisResult.holding_by_kyc` / `realized_by_kyc` report holdings + gains by class — surfaced
   on the cost-basis tile, the 8949 (`taxforms.totals_by_kyc`), and the assistant snapshot.
-- **[P0] Fragment-rebuild basis carry.** A reconciled self-transfer now stores the consumed
-  **source-lot fragments** (`Transaction.carried_lots`, JSON) so `compute()` rebuilds the
-  destination lots preserving each fragment's **original acquisition date** and KYC label. This
-  also fixes a latent bug where a self-transfer collapsed to one lot dated at the transfer,
-  **resetting the holding-period clock** (a >1yr-held coin could be misreported short-term after
-  moving wallets). Holding period now tacks across transfers (IRC §1223).
+- **[P0] Fragment-rebuild basis carry (shared-txid self-transfers only).** A reconciled
+  **shared-txid** self-transfer now stores the consumed **source-lot fragments**
+  (`Transaction.carried_lots`, JSON) so `compute()` rebuilds the destination lots preserving each
+  fragment's **original acquisition date** and KYC label. This also fixes a latent bug where a
+  self-transfer collapsed to one lot dated at the transfer, **resetting the holding-period clock**
+  (a >1yr-held coin could be misreported short-term after moving wallets). Holding period now
+  tacks across transfers (IRC §1223). Fuzzy amount+date / fee-skimmed links are **not**
+  fragment-carried — a hop through an intermediary we can't prove is yours is a final break of
+  ownership (default no carry; opting into the heuristic, or confirming in the inbox, still
+  carries the basis coarsely as a single lot, without tacking the holding period).
 - **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
   (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
   account's FIFO/LIFO/HIFO ordering still applies. Specific-ID **by class**; gain math unchanged.
