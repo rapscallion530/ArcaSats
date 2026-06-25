@@ -38,84 +38,34 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    """Create tables. Import models first so they register on Base.metadata."""
+    """Bring the schema to head via Alembic. Importing models first registers them so the
+    Alembic env (and a fresh baseline) sees the full metadata."""
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    _run_lightweight_migrations()
+    _run_migrations()
 
 
-def _run_lightweight_migrations() -> None:
-    """Add columns introduced after a DB was first created (SQLite ADD COLUMN)."""
-    additive = {
-        "transactions": {
-            "carried_basis_usd": "NUMERIC",
-            "carry_disabled": "INTEGER DEFAULT 0",
-            "fiat_source": "VARCHAR",
-            "transfer_reviewed": "INTEGER DEFAULT 0",
-        },
-        "accounts": {"owner": "VARCHAR DEFAULT ''", "lot_method": "VARCHAR DEFAULT 'fifo'"},
-        "wallets": {"onchain_mode": "VARCHAR DEFAULT 'standalone'",
-                    "address_type": "VARCHAR DEFAULT 'auto'"},
-        "node_config": {"mempool_url": "VARCHAR DEFAULT ''", "price_source": "VARCHAR DEFAULT 'coinbase'"},
-    }
-    # Indexes added after a DB was first created. create_all() only builds indexes for
-    # tables it creates fresh, so existing user DBs need these explicitly. Names must match
-    # the model definitions so create_all() doesn't try to re-create them on fresh DBs.
-    indexes = {
-        "ix_tx_account_ts": "transactions (account_id, timestamp)",
-        "ix_tx_txid": "transactions (txid)",
-        "ix_tx_kind": "transactions (kind)",
-        "ix_wallets_account_id": "wallets (account_id)",
-    }
+def _run_migrations() -> None:
+    """Apply Alembic migrations to the configured DB. A pre-Alembic DB (tables present but no
+    `alembic_version`) is first STAMPED at the baseline, so only the newer migrations run on it;
+    a fresh DB is built from scratch by the baseline. Idempotent — a no-op once at head."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from sqlalchemy import inspect
+
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(repo_root / "alembic"))
+
     with engine.begin() as conn:
-        for table, cols in additive.items():
-            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
-            for col, decl in cols.items():
-                if col not in existing:
-                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
-        for name, target in indexes.items():
-            conn.exec_driver_sql(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
-        # Any pre-existing transaction that already carries a USD value is authoritative
-        # (CSV/API import or a manual entry) — mark it so the price backfill never clobbers
-        # it. Idempotent: only fills rows whose provenance is still unset.
-        conn.exec_driver_sql(
-            "UPDATE transactions SET fiat_source='actual' "
-            "WHERE fiat_value IS NOT NULL AND (fiat_source IS NULL OR fiat_source='')"
-        )
-        # On-chain (xpub) reclassification migration (see docs/onchain-classification.md):
-        # 1) Normalize the dedupe id from kind-based to DIRECTION-based so a future re-sync that
-        #    relabels a tx (e.g. transfer_out -> sell) matches the existing row instead of
-        #    inserting a duplicate.
-        conn.exec_driver_sql(
-            "UPDATE transactions SET external_id = replace(external_id, ':transfer_in', ':in') "
-            "WHERE source LIKE 'xpub:%' AND external_id LIKE '%:transfer_in'")
-        conn.exec_driver_sql(
-            "UPDATE transactions SET external_id = replace(external_id, ':transfer_out', ':out') "
-            "WHERE source LIKE 'xpub:%' AND external_id LIKE '%:transfer_out'")
-        # 2) Reclassify existing on-chain rows in STANDALONE wallets: a blanket transfer label
-        #    was hiding taxable buys/sells. External inflow -> buy, external outflow -> sell.
-        #    Idempotent (only rows still labeled transfer_in/out). Genuine cross-wallet transfers
-        #    are restored to "transfer" by reconcile_internal_transfers() on the next reconcile.
-        conn.exec_driver_sql(
-            "UPDATE transactions SET kind='buy' WHERE source LIKE 'xpub:%' AND kind='transfer_in' "
-            "AND wallet_id IN (SELECT id FROM wallets WHERE onchain_mode='standalone')")
-        conn.exec_driver_sql(
-            "UPDATE transactions SET kind='sell' WHERE source LIKE 'xpub:%' AND kind='transfer_out' "
-            "AND wallet_id IN (SELECT id FROM wallets WHERE onchain_mode='standalone')")
-
-    # Drop the obsolete llm_connections.allow_remote column. The assistant's locality is gated by
-    # assistant_endpoint_allowed()/BTT_ASSISTANT_ALLOW_LAN (services/llm.py), never this per-row
-    # flag, so the column is dead. DROP COLUMN needs SQLite >= 3.35; on an older engine we leave
-    # the (now-ignored) column rather than fail the migration. Runs in its OWN transaction so a
-    # failure can't roll back the steps above.
-    try:
-        with engine.begin() as conn:
-            cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(llm_connections)")}
-            if "allow_remote" in cols:
-                conn.exec_driver_sql("ALTER TABLE llm_connections DROP COLUMN allow_remote")
-    except Exception:  # noqa: BLE001  (pre-3.35 SQLite without DROP COLUMN — harmless to keep)
-        pass
+        already_stamped = MigrationContext.configure(conn).get_current_revision() is not None
+        predates_alembic = inspect(conn).has_table("accounts") and not already_stamped
+    if predates_alembic:
+        command.stamp(cfg, "0001_baseline")  # adopt the existing schema as the baseline
+    command.upgrade(cfg, "head")
 
 
 def get_session() -> Iterator[Session]:

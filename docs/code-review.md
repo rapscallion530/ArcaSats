@@ -11,7 +11,7 @@ License: MIT (see [`../LICENSE`](../LICENSE)). Contributions and audits are welc
 ```
 app/
   main.py            ASGI app + auth/CSRF middleware (the security gate for every request)
-  db.py              SQLAlchemy engine, SQLite PRAGMAs, lightweight additive migrations
+  db.py              SQLAlchemy engine, SQLite PRAGMAs, Alembic migration runner
   models.py          ORM models (money: BTC=int sats, USD=Decimal) + indexes
   config.py          env-driven settings (network OFF by default)
   templating.py      Jinja env + money filters (autoescape on)
@@ -70,14 +70,16 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
   gift/donation/mining/inheritance/lost-coin classifications.
 
 ### Schema / migrations
-- **Additive-only migrations** — `db.py` does `ALTER TABLE`/`CREATE INDEX` (plus one guarded
-  `DROP COLUMN`); it can't do renames or ordered backfills. Adopt **Alembic** before the schema
-  grows further.
-- **`PRAGMA foreign_keys=ON` deferred** — to be enabled by the Alembic migration (with the
-  ON DELETE rules + table rebuild). ORM cascades handle child cleanup meanwhile.
-- **Existing-DB dedup** — older DBs still carry the old global `(source, external_id)`
-  uniqueness; new DBs use `(account_id, source, external_id)`. A table-rebuild migration would
-  drop the old constraint (it over-dedups across accounts meanwhile).
+- **Migrations: Alembic** ✅ — the schema is versioned under `alembic/` and applied at startup
+  (`db.init_db` → `alembic upgrade head`; a pre-Alembic DB is stamped at the baseline first, then
+  migration `0002` drops the orphaned `users`/`owner_user_id`/`allow_remote`). The old hand-rolled
+  `ALTER`/`CREATE INDEX` runner is gone.
+- **`PRAGMA foreign_keys=ON` deferred** — now a straightforward Alembic migration away (add the
+  ON DELETE rules + table rebuild, then flip the pragma). ORM cascades handle child cleanup
+  meanwhile.
+- **Existing-DB dedup** — older DBs still carry the old global `(source, external_id)` uniqueness;
+  new DBs (the Alembic baseline) use `(account_id, source, external_id)`. A small Alembic
+  table-rebuild migration can now drop the old constraint (it over-dedups across accounts meanwhile).
 
 ### Privacy / egress
 - **Centralize the locality check** — `llm.is_local`, `electrum._is_lan_host`,
