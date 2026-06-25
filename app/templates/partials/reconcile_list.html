@@ -7,7 +7,7 @@
         {% set c = s.confidence %}
         <span class="text-[10px] px-1.5 py-0.5 rounded-full
                      {% if c == 'high' %}bg-surfaceblue text-gain{% elif c == 'medium' %}bg-surfaceblue text-headingalt{% else %}bg-surfaceblue text-muted{% endif %}">{{ c }} match</span>
-        <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-muted ml-1">{{ s.match_reason }}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-muted ml-1">shared address</span>
         <span class="text-muted ml-2">Δ {{ s.amount_delta_sats|btcamt }} <span class="unit">BTC</span>, {{ s.days_apart }} day(s) apart</span>
       </div>
     </div>

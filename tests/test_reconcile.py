@@ -2,25 +2,37 @@
 import datetime as dt
 from decimal import Decimal
 
-from app.models import TxKind
+from app.models import HopAddress, TxKind
 from app.services import accounts as acc
 from app.services import costbasis
 from app.services import transactions as tx_svc
 
+_INTERMEDIARY = "bc1q-untracked-intermediary"
 
-def _two_hop(session, *, owner_c="", out_txid=None, in_txid=None):
-    """A: buy 0.01 then send 0.01 out; C: receive 0.0099 the next day (a hop we don't track)."""
+
+def _two_hop(session, *, owner_c="", out_txid="outTX", in_txid="inTX", shared_addr=_INTERMEDIARY):
+    """A: buy 0.01 then send 0.01 out to an untracked address; C: receive 0.0099 the next day,
+    funded by that same address. They're linked by the SHARED intermediary address (HopAddress),
+    not by amount/date."""
     a = acc.create_account(session, name="A")
     c = acc.create_account(session, name="C", owner=owner_c)
-    tx_svc.add_transaction(session, account_id=a.id, kind=TxKind.BUY,
+    wa = acc.add_wallet(session, a.id, "wa", "xpub", xpub=None)
+    wc = acc.add_wallet(session, c.id, "wc", "xpub", xpub=None)
+    tx_svc.add_transaction(session, account_id=a.id, wallet_id=wa.id, kind=TxKind.BUY,
                            timestamp=dt.datetime(2025, 1, 1), amount_sats=1_000_000,
                            fiat_value=Decimal("1000"), fiat_source="actual")
-    out_tx = tx_svc.add_transaction(session, account_id=a.id, kind=TxKind.SELL,
+    out_tx = tx_svc.add_transaction(session, account_id=a.id, wallet_id=wa.id, kind=TxKind.SELL,
                                     timestamp=dt.datetime(2025, 1, 5), amount_sats=1_000_000,
                                     fiat_value=Decimal("1100"), fiat_source="actual", txid=out_txid)
-    in_tx = tx_svc.add_transaction(session, account_id=c.id, kind=TxKind.BUY,
+    in_tx = tx_svc.add_transaction(session, account_id=c.id, wallet_id=wc.id, kind=TxKind.BUY,
                                    timestamp=dt.datetime(2025, 1, 6), amount_sats=990_000,
                                    fiat_value=Decimal("1050"), fiat_source="actual", txid=in_txid)
+    if shared_addr:
+        session.add(HopAddress(account_id=a.id, wallet_id=wa.id, txid=out_txid, direction="out",
+                               address=shared_addr))
+        session.add(HopAddress(account_id=c.id, wallet_id=wc.id, txid=in_txid, direction="in",
+                               address=shared_addr))
+        session.commit()
     return a, c, out_tx, in_tx
 
 
@@ -30,7 +42,7 @@ def test_suggests_sell_buy_pair_across_accounts(session):
     assert len(sugg) == 1
     s = sugg[0]
     assert s.out_tx.id == out_tx.id and s.in_tx.id == in_tx.id
-    assert s.amount_delta_sats == 10_000 and s.days_apart == 1
+    assert s.shared_address == _INTERMEDIARY and s.confidence == "high"
     assert s.out_account == "A" and s.in_account == "C"
 
 
@@ -45,15 +57,10 @@ def test_different_owner_not_suggested(session):
     assert costbasis.suggest_transfers(session) == []
 
 
-def test_amount_out_of_tolerance_not_suggested(session):
-    a = acc.create_account(session, name="A")
-    c = acc.create_account(session, name="C")
-    tx_svc.add_transaction(session, account_id=a.id, kind=TxKind.SELL,
-                           timestamp=dt.datetime(2025, 1, 5), amount_sats=1_000_000,
-                           fiat_value=Decimal("1100"))
-    tx_svc.add_transaction(session, account_id=c.id, kind=TxKind.BUY,
-                           timestamp=dt.datetime(2025, 1, 6), amount_sats=500_000,  # way off
-                           fiat_value=Decimal("550"))
+def test_no_shared_address_not_suggested(session):
+    # No shared intermediary address -> no suggestion (amount+date matching was removed, so a
+    # close-amount/close-date coincidence is never proposed).
+    _two_hop(session, shared_addr="")
     assert costbasis.suggest_transfers(session) == []
 
 
@@ -97,10 +104,15 @@ def test_reconcile_route_and_confirm(client):
         cid = s.scalar(select(Account.id).where(Account.name == "RC"))
         out_tx = tx_svc.add_transaction(s, account_id=aid, kind=TxKind.SELL,
                                         timestamp=dt.datetime(2025, 1, 5), amount_sats=1_000_000,
-                                        fiat_value=Decimal("1100"))
+                                        fiat_value=Decimal("1100"), txid="routeOut")
         in_tx = tx_svc.add_transaction(s, account_id=cid, kind=TxKind.BUY,
                                        timestamp=dt.datetime(2025, 1, 6), amount_sats=995_000,
-                                       fiat_value=Decimal("1090"))
+                                       fiat_value=Decimal("1090"), txid="routeIn")
+        s.add(HopAddress(account_id=aid, wallet_id=0, txid="routeOut", direction="out",
+                         address=_INTERMEDIARY))
+        s.add(HopAddress(account_id=cid, wallet_id=0, txid="routeIn", direction="in",
+                         address=_INTERMEDIARY))
+        s.commit()
         out_id, in_id = out_tx.id, in_tx.id
 
     page = client.get("/reconcile")

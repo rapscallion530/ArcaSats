@@ -5,18 +5,20 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
-## Unreleased — address-based fuzzy-hop detection
+## Unreleased — address-based fuzzy-hop detection (amount+date matching removed)
 
-The reconciliation inbox matched candidate self-transfers purely on amount + date (±0.002 BTC,
-≤7 days) — fragile when a hop changes the sats (fees/partials/batching) or spans a long time.
-Now it's **address-first**: the xpub scanner records the foreign address one hop from each of our
-txs (a spend's destination — free, from the vout we already fetch; an inflow's funder — via a
-prevtx fetch, since a vin carries only `txid:vout`), and `suggest_transfers` matches a
-known→unknown→known hop by that shared intermediary address, robust to amount/time drift
-(amount+date kept as a fallback). New `hop_addresses` table + migration `0004`; new endpoints
-populate on the next Sync. Stays inward-only (one hop from your own coins; addresses are local,
-never egressed); a confirmed fuzzy hop still carries basis coarsely (no fragment rebuild). New
-inbox UI shows the match reason + the shared address. (164 tests.)
+The reconciliation inbox matched candidate self-transfers on amount + date (±0.002 BTC, ≤7 days)
+— fragile when a hop changes the sats (fees/partials/batching) or spans a long time, and prone to
+mispairing. That method is **removed**. Detection is now **address-only**: the xpub scanner
+records the foreign address one hop from each of our txs (a spend's destination — free, from the
+vout we already fetch; an inflow's funder — via a prevtx fetch, since a vin carries only
+`txid:vout`), and `suggest_transfers` matches a known→unknown→known hop by that shared
+intermediary address, robust to amount/time drift. A hop with no shared address simply isn't
+suggested. The auto reconciler likewise only carries proven **shared-txid** transfers (the
+`include_heuristic` amount+date auto-carry is gone). New `hop_addresses` table + migration `0004`;
+endpoints populate on the next Sync. Inward-only (one hop from your own coins; addresses are
+local, never egressed); a confirmed fuzzy hop still carries basis coarsely (no fragment rebuild).
+New inbox UI shows the shared address. (164 tests.)
 
 ## Unreleased — KYC/UTXO lot engine (audit #8)
 
@@ -36,10 +38,10 @@ egress behavior change. (Migration `0003_kyc_origin`; 156 tests.)
   fragment's **original acquisition date** and KYC label. This also fixes a latent bug where a
   self-transfer collapsed to one lot dated at the transfer, **resetting the holding-period clock**
   (a >1yr-held coin could be misreported short-term after moving wallets). Holding period now
-  tacks across transfers (IRC §1223). Fuzzy amount+date / fee-skimmed links are **not**
-  fragment-carried — a hop through an intermediary we can't prove is yours is a final break of
-  ownership (default no carry; opting into the heuristic, or confirming in the inbox, still
-  carries the basis coarsely as a single lot, without tacking the holding period).
+  tacks across transfers (IRC §1223). Fuzzy links (no shared txid) are **not** fragment-carried —
+  a hop through an intermediary we can't prove is yours is a final break of ownership (default no
+  carry; confirming the address-matched pair in the inbox still carries the basis coarsely as a
+  single lot, without tacking the holding period).
 - **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
   (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
   account's FIFO/LIFO/HIFO ordering still applies. Specific-ID **by class**; gain math unchanged.

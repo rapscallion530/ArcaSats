@@ -512,18 +512,14 @@ def compute_account_breakdown(
     return account_res, per_wallet
 
 
-# Tolerances for matching an exchange withdrawal to its on-chain deposit (no shared txid).
-_AMOUNT_TOL_SATS = 100_000      # 0.001 BTC — covers the network fee skimmed in transit
-_DATE_WINDOW = dt.timedelta(days=3)
-
-
 def find_transfer_matches(session: Session) -> list[tuple]:
-    """(transfer_out, transfer_in, kind) triples for the SAME owner's coins moving between
-    DIFFERENT accounts. kind is "txid" (shared on-chain id — reliable, auto-appliable) or
-    "heuristic" (amount+date only — needs human review before mutating basis).
+    """(transfer_out, transfer_in) pairs for the SAME owner's coins moving between DIFFERENT
+    accounts under a SHARED on-chain txid — reliable, so basis carry is applied automatically.
 
-    Owner identity is the account's `owner` label (blank = you): a transfer to a DIFFERENT
-    owner is a gift, not a self-transfer, so basis must not carry across it."""
+    Coins routed through an address we don't track (no shared txid) are NOT matched here: they're
+    surfaced as address-based suggestions in the reconciliation inbox (suggest_transfers) for the
+    user to confirm. Owner identity is the account's `owner` label (blank = you): a transfer to a
+    DIFFERENT owner is a gift, not a self-transfer, so basis must not carry across it."""
     owner_of = {a.id: _norm_owner(a.owner)
                 for a in session.scalars(select(Account)).all()}
     rows = session.scalars(
@@ -535,9 +531,7 @@ def find_transfer_matches(session: Session) -> list[tuple]:
     def same_owner_cross(o, i):
         return o.account_id != i.account_id and owner_of.get(o.account_id) == owner_of.get(i.account_id)
 
-    pairs, used_in, used_out = [], set(), set()
-
-    # 1) shared-txid matches (most reliable -> safe to auto-apply)
+    pairs, used_in = [], set()
     in_by_txid: dict[str, list] = {}
     for i in ins:
         if i.txid:
@@ -547,26 +541,7 @@ def find_transfer_matches(session: Session) -> list[tuple]:
             continue
         for i in in_by_txid.get(o.txid, []):
             if i.id not in used_in and same_owner_cross(o, i):
-                pairs.append((o, i, "txid")); used_in.add(i.id); used_out.add(o.id); break
-
-    # 2) amount+date matches for the rest (exchange withdrawal -> on-chain deposit). These are
-    #    heuristic guesses (a 3-day / 0.001 BTC window can mispair) -> flagged for review, not
-    #    auto-applied.
-    for o in outs:
-        if o.id in used_out:
-            continue
-        best = None
-        for i in ins:
-            if i.id in used_in or not same_owner_cross(o, i):
-                continue
-            if abs(o.amount_sats - i.amount_sats) > _AMOUNT_TOL_SATS:
-                continue
-            if not (o.timestamp <= i.timestamp <= o.timestamp + _DATE_WINDOW):
-                continue
-            if best is None or i.timestamp < best.timestamp:
-                best = i
-        if best is not None:
-            pairs.append((o, best, "heuristic")); used_in.add(best.id); used_out.add(o.id)
+                pairs.append((o, i)); used_in.add(i.id); break
 
     pairs.sort(key=lambda p: (p[0].timestamp, p[0].id or 0))
     return pairs
@@ -617,8 +592,8 @@ def reclassify_onchain_transfers(session: Session) -> int:
 # Candidate self-transfers that share NO txid (coins that left one wallet and reappeared in
 # another through an address we don't track). These are SUGGESTIONS only — never auto-applied,
 # because on-chain we can't prove the intermediary is yours (see docs/utxo-tracking.md scope).
-_SUGGEST_WINDOW = dt.timedelta(days=7)          # an inflow within a week of the outflow
-_SUGGEST_AMOUNT_TOL_SATS = 200_000              # 0.002 BTC — a couple of hops' worth of fees
+# Detection is by the SHARED intermediary ADDRESS only (an outflow's destination that later funds
+# an inflow); amount/time are never used to guess a link — too unreliable across fees and gaps.
 _OUTFLOW_SUGGEST = (TxKind.SELL, TxKind.TRANSFER_OUT)
 _INFLOW_SUGGEST = (TxKind.BUY, TxKind.TRANSFER_IN)
 
@@ -631,36 +606,25 @@ class TransferSuggestion:
     days_apart: int
     out_account: str = ""
     in_account: str = ""
-    match_reason: str = "amount+date"   # "shared address" | "amount+date"
-    shared_address: str = ""            # the unknown intermediary, for a "shared address" match
+    shared_address: str = ""   # the unknown intermediary linking the two txs
 
     @property
     def confidence(self) -> str:
-        # A shared intermediary address is a strong signal on its own — the sats and timing can
-        # drift a lot across a real hop, so they don't downgrade it.
-        if self.match_reason == "shared address":
-            return "high"
-        if self.amount_delta_sats <= 10_000 and self.days_apart <= 1:
-            return "high"
-        if self.amount_delta_sats <= 100_000 and self.days_apart <= 3:
-            return "medium"
-        return "low"
+        # Every suggestion is a shared-intermediary-address match — a strong signal on its own
+        # (the sats and timing can drift a lot across a real hop, and don't factor in).
+        return "high"
 
 
 def suggest_transfers(session: Session) -> list[TransferSuggestion]:
-    """Propose same-owner outflow→inflow pairs that look like one self-transfer split across two
-    transactions with different txids (a known→unknown→known hop). The user confirms or rejects.
+    """Propose same-owner outflow→inflow pairs that look like one self-transfer routed through an
+    address we don't track (a known→unknown→known hop), matched by the SHARED intermediary
+    ADDRESS: your outflow paid an unknown address that later funded your inflow (`HopAddress`
+    "out"/"in", captured during the xpub scan). Robust to amount and time drift. Excludes anything
+    already proven (shared txid -> auto reconciler), adjudicated (`transfer_reviewed`), or already
+    carrying basis. One best inflow per outflow; never auto-applied — the user confirms or rejects.
 
-    Two signals, address-first:
-      1. **Shared intermediary address** — your outflow paid an unknown address that later funded
-         your inflow (`HopAddress` "out"/"in" captured during the xpub scan). Robust to amount and
-         time drift — the whole point. This is the preferred match.
-      2. **Amount + date** fallback — for outflows with no address match (e.g. an exchange CSV
-         withdrawal that was never on-chain-scanned, so has no hop addresses): one best inflow in a
-         tight ±0.002 BTC / 7-day window.
-
-    Excludes anything already proven (shared txid), adjudicated (`transfer_reviewed`), or already
-    carrying basis. One best inflow per outflow; never auto-applied."""
+    (There is no amount+date fallback: matching fuzzy hops by amount/time was removed — it
+    mispairs across fees and long gaps. A hop with no shared address simply isn't suggested.)"""
     accts = {a.id: a for a in session.scalars(select(Account)).all()}
     owner_of = {aid: _norm_owner(a.owner) for aid, a in accts.items()}
     internal = internal_txids(session)
@@ -681,33 +645,20 @@ def suggest_transfers(session: Session) -> list[TransferSuggestion]:
     for h in session.scalars(select(HopAddress)).all():
         (out_addrs if h.direction == "out" else in_addrs)[h.txid].add(h.address)
 
-    used_in: set[int] = set()
-    used_out: set[int] = set()
-    out: list[TransferSuggestion] = []
-
     def pairable(o: Transaction, i: Transaction) -> bool:
-        return (i.id not in used_in
-                and (o.account_id, o.wallet_id) != (i.account_id, i.wallet_id)
+        return ((o.account_id, o.wallet_id) != (i.account_id, i.wallet_id)
                 and owner_of.get(o.account_id) == owner_of.get(i.account_id)
                 and not (o.txid and i.txid and o.txid == i.txid))  # shared txid -> auto reconciler
 
-    def emit(o: Transaction, i: Transaction, reason: str, shared: str = "") -> None:
-        used_in.add(i.id)
-        used_out.add(o.id)
-        out.append(TransferSuggestion(
-            out_tx=o, in_tx=i, amount_delta_sats=abs(o.amount_sats - i.amount_sats),
-            days_apart=(i.timestamp - o.timestamp).days,
-            out_account=accts[o.account_id].name, in_account=accts[i.account_id].name,
-            match_reason=reason, shared_address=shared))
-
-    # Phase 1 — shared intermediary address (amount/time agnostic; inflow must follow the outflow).
+    used_in: set[int] = set()
+    out: list[TransferSuggestion] = []
     for o in outs:
         o_dests = out_addrs.get(o.txid or "", set())
         if not o_dests:
             continue
         best, best_key, best_shared = None, None, ""
         for i in ins:
-            if not pairable(o, i) or i.timestamp < o.timestamp:
+            if i.id in used_in or not pairable(o, i) or i.timestamp < o.timestamp:
                 continue
             shared = o_dests & in_addrs.get(i.txid or "", set())
             if not shared:
@@ -716,27 +667,12 @@ def suggest_transfers(session: Session) -> list[TransferSuggestion]:
             if best_key is None or key < best_key:
                 best, best_key, best_shared = i, key, sorted(shared)[0]
         if best is not None:
-            emit(o, best, "shared address", best_shared)
-
-    # Phase 2 — amount+date fallback for outflows the address pass didn't match.
-    for o in outs:
-        if o.id in used_out:
-            continue
-        best, best_score = None, None
-        for i in ins:
-            if not pairable(o, i):
-                continue
-            if not (o.timestamp <= i.timestamp <= o.timestamp + _SUGGEST_WINDOW):
-                continue
-            delta = abs(o.amount_sats - i.amount_sats)
-            if delta > _SUGGEST_AMOUNT_TOL_SATS:
-                continue
-            score = (delta, i.timestamp - o.timestamp)
-            if best_score is None or score < best_score:
-                best, best_score = i, score
-        if best is not None:
-            emit(o, best, "amount+date")
-
+            used_in.add(best.id)
+            out.append(TransferSuggestion(
+                out_tx=o, in_tx=best, amount_delta_sats=abs(o.amount_sats - best.amount_sats),
+                days_apart=(best.timestamp - o.timestamp).days,
+                out_account=accts[o.account_id].name, in_account=accts[best.account_id].name,
+                shared_address=best_shared))
     out.sort(key=lambda s: (s.out_tx.timestamp, s.out_tx.id or 0))
     return out
 
@@ -784,18 +720,16 @@ def reject_suggestion(session: Session, out_tx_id: int, in_tx_id: int) -> tuple[
     return True, ""
 
 
-def reconcile_internal_transfers(session: Session, include_heuristic: bool = False) -> int:
-    """Carry cost basis across same-owner self-transfers between accounts. First relabels any
-    cross-wallet on-chain buy/sell pairs back to transfers. By default ONLY exact shared-txid
-    matches are applied automatically; amount+date heuristic matches are left for explicit
-    review (pass include_heuristic=True to apply them too). Honors the per-transfer carry
-    opt-out. Returns the number of transfer_ins updated."""
+def reconcile_internal_transfers(session: Session) -> int:
+    """Carry cost basis across same-owner self-transfers between accounts that share an on-chain
+    txid. First relabels any cross-wallet on-chain buy/sell pairs back to transfers. Only exact
+    shared-txid matches are auto-applied — coins routed through an untracked address are left for
+    the reconciliation inbox (address-based suggestions the user confirms). Honors the per-transfer
+    carry opt-out. Returns the number of transfer_ins updated."""
     reclassify_onchain_transfers(session)
     updated = 0
     src_cache: dict[int, CostBasisResult] = {}  # memoize per source account (was recomputed per pair)
-    for out_tx, in_tx, kind in find_transfer_matches(session):
-        if kind != "txid" and not include_heuristic:
-            continue  # don't silently mutate basis on a heuristic guess
+    for out_tx, in_tx in find_transfer_matches(session):
         if in_tx.carry_disabled:  # user opted this destination out of carryover
             continue
         if out_tx.account_id not in src_cache:
@@ -803,11 +737,9 @@ def reconcile_internal_transfers(session: Session, include_heuristic: bool = Fal
         src = src_cache[out_tx.account_id]
         key = tx_key(out_tx)
         consumed = src.transfer_out_basis.get(key, Decimal("0"))
-        # Fragment-rebuild carry (original dates + per-fragment KYC) only for PROVEN shared-txid
-        # matches. A heuristic amount+date link is treated coarsely (single carried_basis_usd lot),
-        # since a hop through an intermediary we can't prove is yours shouldn't tack the holding
-        # period or split provenance.
-        frags_json = _fragments_json(src.transfer_out_lots.get(key, [])) if kind == "txid" else None
+        # A shared-txid match is proven, so carry the full lot fragments (original dates +
+        # per-fragment KYC, holding period tacks).
+        frags_json = _fragments_json(src.transfer_out_lots.get(key, []))
         if in_tx.carried_basis_usd != consumed or in_tx.carried_lots != frags_json:
             in_tx.carried_basis_usd = consumed
             in_tx.carried_lots = frags_json

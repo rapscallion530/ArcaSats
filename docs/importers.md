@@ -52,8 +52,11 @@ Transaction, Subtotal, Total (inclusive of fees and/or spread), Fees and/or Spre
 - `Total (inclusive of fees and/or spread)` is the basis (buy) / net proceeds (sell) directly —
   no separate fee is applied (it's already in the total). Non-BTC `Asset` rows ignored.
 - Note: Coinbase `Send` rows carry no on-chain txid in this export, so a send→self-custody can't
-  be auto-connected by shared txid — use the reconciliation inbox (amount+date) to mark it a
-  transfer.
+  be auto-connected by shared txid. The reconciliation inbox matches by a shared on-chain address,
+  which a CSV row doesn't carry, so it won't auto-suggest this either (amount+date matching was
+  removed). Reconnect it manually — edit the send to `transfer_out` and the matching deposit to
+  `transfer_in` (set the carried basis) — or, best, load that self-custody wallet as an xpub so
+  the deposit gains an on-chain txid and reconciles automatically.
 
 ### Strike (Annual Account Statement)
 Header: `Transaction ID, Time (UTC), Status, Transaction Type, Amount USD, Fee USD, Amount BTC,

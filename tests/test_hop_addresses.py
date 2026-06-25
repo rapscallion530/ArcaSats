@@ -103,12 +103,13 @@ def test_address_match_beats_amount_and_time_drift(session):
     assert len(sugg) == 1
     s = sugg[0]
     assert s.out_tx.id == o.id and s.in_tx.id == i.id
-    assert s.match_reason == "shared address"
     assert s.confidence == "high"            # not downgraded by the 0.2 BTC / 60-day gap
     assert s.shared_address == "U-INTERMEDIARY"
 
 
-def test_amount_date_fallback_when_no_shared_address(session):
+def test_no_shared_address_yields_no_suggestion(session):
+    # Without a shared intermediary address there is no suggestion — amount+date matching was
+    # removed, so a close-amount/close-date pair is NOT proposed.
     A = acc.create_account(session, name="A2")
     B = acc.create_account(session, name="B2")
     txsvc.add_transaction(session, account_id=A.id, kind=TxKind.TRANSFER_OUT,
@@ -117,8 +118,7 @@ def test_amount_date_fallback_when_no_shared_address(session):
     txsvc.add_transaction(session, account_id=B.id, kind=TxKind.TRANSFER_IN,
                           timestamp=dt.datetime(2024, 2, 1, 12), amount_sats=int(0.2 * BTC) - 3000,
                           txid="dep2", external_id="dep2:in")
-    sugg = costbasis.suggest_transfers(session)
-    assert len(sugg) == 1 and sugg[0].match_reason == "amount+date"
+    assert costbasis.suggest_transfers(session) == []
 
 
 def test_address_match_excludes_shared_txid_and_reviewed(session):

@@ -271,28 +271,25 @@ def test_hifo_medium_ledger_uses_fast_selector():
     assert elapsed < 2.0
 
 
-def test_exchange_to_onchain_amount_date_match_carries(session):
+def test_no_shared_txid_transfer_is_not_auto_carried(session):
+    # Coins through an untracked address (no shared txid) are NOT auto-reconciled — amount+date
+    # matching was removed. The destination keeps no basis until the user confirms it in the
+    # reconciliation inbox (by a shared intermediary address).
     import datetime as dt
     from app.services import accounts as acc
     from app.services import transactions as txsvc
-    ex = acc.create_account(session, name="Coinbase")   # owner "" (you)
-    cold = acc.create_account(session, name="Cold")      # owner "" (you)
+    ex = acc.create_account(session, name="Coinbase")
+    cold = acc.create_account(session, name="Cold")
     amt = int(Decimal("0.2") * SATS_PER_BTC)
     txsvc.add_transaction(session, account_id=ex.id, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 1),
                           amount_sats=amt, fiat_value=Decimal("18000"))
-    # exchange withdrawal: NO txid (CSV "Send")
     txsvc.add_transaction(session, account_id=ex.id, kind=TxKind.TRANSFER_OUT,
                           timestamp=dt.datetime(2025, 2, 1, 10), amount_sats=amt)
-    # on-chain deposit next day, slightly less (network fee), has a txid
     txsvc.add_transaction(session, account_id=cold.id, kind=TxKind.TRANSFER_IN,
                           timestamp=dt.datetime(2025, 2, 1, 12), amount_sats=amt - 5000,
                           txid="deposit1", external_id="deposit1:in")
-    # Heuristic (amount+date) matches are NOT auto-applied — they need explicit review.
     assert costbasis.reconcile_internal_transfers(session) == 0
-    # Opting into heuristic matching carries the basis.
-    n = costbasis.reconcile_internal_transfers(session, include_heuristic=True)
-    assert n == 1
-    assert costbasis.compute_account(session, cold.id).holding_basis_usd == Decimal("18000.00")
+    assert costbasis.compute_account(session, cold.id).holding_basis_usd == Decimal("0.00")
 
 
 def test_carry_disabled_ignores_carried_basis():

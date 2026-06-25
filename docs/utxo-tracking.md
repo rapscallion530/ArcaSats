@@ -60,10 +60,10 @@ custodial omnibus sources with no output-level visibility). See `app/services/co
   self-transfer carries provenance by storing the consumed **source-lot fragments** as JSON on the
   destination `transfer_in` (`Transaction.carried_lots`); `compute()` rebuilds the destination lots
   from those fragments, preserving each one's **original acquisition date** (holding period tacks,
-  IRC §1223) and its own KYC label. A **fuzzy** amount+date / fee-skimmed link is not
-  fragment-carried — a hop through an intermediary we can't prove is yours is a final break of
-  ownership (by default no carry; an opt-in heuristic or an inbox confirmation still carries the
-  basis coarsely as one lot, without tacking the holding period).
+  IRC §1223) and its own KYC label. A **fuzzy** link (no shared txid) is not fragment-carried —
+  a hop through an intermediary we can't prove is yours is a final break of ownership (by default
+  no carry; confirming the address-matched pair in the inbox still carries the basis coarsely as
+  one lot, without tacking the holding period).
   `CostBasisResult.holding_by_kyc` / `realized_by_kyc` (and the 8949 / assistant snapshot) report
   holdings + gains by class.
 - **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
@@ -81,8 +81,9 @@ the xpub scanner records, per our transaction, the foreign address one hop away 
 inflow's **funder** (`"in"`, fetched from each input's previous tx, since a vin carries only
 `txid:vout`). `costbasis.suggest_transfers` then matches an outflow whose destination address
 later **funds** an inflow — the same unknown intermediary — regardless of how much the sats or the
-timing drifted. Amount+date remains a fallback for outflows with no address data (e.g. an exchange
-CSV withdrawal that was never on-chain-scanned).
+timing drifted. There is **no amount+date fallback** (it mispairs across fees and long gaps and
+was removed): an outflow with no shared address simply isn't suggested. The auto reconciler
+(`reconcile_internal_transfers`) likewise carries only proven shared-txid transfers.
 
 This stays **inward**: we only ever look at addresses *directly adjacent* to the user's own coins
 (one hop), never a deeper walk through third-party addresses (that would be the out-of-scope
