@@ -6,7 +6,7 @@
 
 A **local-only** US Bitcoin tax & accounting tool, intended to run as a self-hosted service on **StartOS** (Start9) alongside an existing Bitcoin full node / Lightning / mempool / Electrum-server stack. Goal: replace a bitcoin.tax subscription with a private, self-hosted alternative.
 
-> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, multi-user, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **120 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
+> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, multi-user, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **141 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
 
 ## License & auditing
 
@@ -24,7 +24,7 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 
 ## Hard constraints
 
-- **Local-only.** No personal/transactional data leaves the machine. Outbound is limited to: your own node's Electrum server (over Tor), and a market-price feed (public data, dates only — no PII).
+- **Local-only.** No personal/transactional data leaves the machine. Outbound is limited to: your own node's Electrum server (over Tor), and a market-price feed (public BTC/USD candles, batched by **week** — reveals only the week of activity, never amounts, addresses, or PII).
 - **Read/download only** for any connected account — never transact.
 - Node access for xpub scanning via **electrs/Fulcrum** (confirmed available).
 
@@ -37,7 +37,7 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 | Build approach | MVP first, incremental |
 | Account/user model | Labels/accounts now, per-person logins later |
 | Node access | electrs / Fulcrum (Electrum server) |
-| Sources | Coinbase (API), Strike (API/CSV), Swan (CSV), Bisq (CSV), xpub (on-chain) |
+| Sources | Coinbase (CSV), Strike (CSV), Swan (CSV), Bisq (CSV), generic (CSV), xpub (on-chain). *Direct exchange APIs removed — CSV only.* |
 | Scale | Moderate — daily DCA plus other activity, mostly buys/transfers, few sells, <500 tx/year |
 | **UI stack** | **FastAPI + HTMX + Tailwind** (Python end-to-end, single container) |
 | UI palette | Adapted from dirigobtc.org — see `docs/design-system.md` |

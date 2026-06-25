@@ -79,7 +79,10 @@
         <input name="mempool_url" value="{{ cfg.mempool_url }}" autocomplete="off"
                placeholder="http://your-mempool.local:3006  or  https://abcd…xyz.onion"
                class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
-        <span class="text-muted text-xs">A mempool.space-compatible explorer (your node's mempool on StartOS/Umbrel, a LAN instance, or a .onion). Adds a private "explorer ↗" link on each on-chain transaction. Your browser navigates there directly — ArcaSats sends nothing.</span>
+        <span class="text-muted text-xs">A mempool.space-compatible explorer. For privacy, use your <strong>own</strong> instance — your node's mempool on StartOS/Umbrel, a LAN instance, or a <code>.onion</code>. Adds an "explorer&nbsp;↗" link on each on-chain transaction. ArcaSats itself sends nothing; <em>your browser</em> opens the link, so whatever host you point this at sees the txid you click.</span>
+        {% if explorer_is_public %}
+        <span class="mt-2 block rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-xs text-warn">⚠ This explorer host isn't local or <code>.onion</code> — clicking an "explorer&nbsp;↗" link reveals the transaction id (and your IP) to a third-party service. Prefer your own node's mempool or a <code>.onion</code> to keep it private.</span>
+        {% endif %}
       </label>
 
       <div class="flex items-center gap-3">

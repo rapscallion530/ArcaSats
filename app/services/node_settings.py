@@ -8,14 +8,34 @@ Tor automatically; a Tor toggle also lets clearnet hosts go over Tor for privacy
 """
 from __future__ import annotations
 
+import ipaddress
 import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
 from app import config
 from app.models import NodeConfig
 from app.services.electrum import ElectrumClient
+
+
+def explorer_is_private(url: str) -> bool:
+    """UX heuristic (NOT an egress gate): is the configured block-explorer URL a local/own
+    instance, so clicking its tx link doesn't leak the txid (and your IP) to a third party?
+
+    True for: an empty URL (no links rendered), localhost, a loopback/private/link-local IP,
+    a `.onion` (Tor), or a `.local` (mDNS) host. A public host (e.g. mempool.space) returns
+    False so the UI can warn. Deliberately DNS-free — rendering a settings page must not trigger
+    a network lookup (contrast `llm.is_local`, which resolves the host and excludes `.onion`)."""
+    host = (urlparse(url).hostname or "").lower() if url else ""
+    if not host or host == "localhost" or host.endswith((".onion", ".local")):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False  # an ordinary public hostname — treat as public (warn)
+    return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
 def get_config(session: Session) -> NodeConfig:

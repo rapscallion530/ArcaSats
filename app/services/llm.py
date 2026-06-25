@@ -7,10 +7,9 @@ Supports two endpoint styles, both commonly served locally:
   - "openai"  -> POST {base}/v1/chat/completions, models via {base}/v1/models
                  (LM Studio, llama.cpp --api, vLLM, etc.)
 
-Privacy: the assistant feeds the model your real coin data, so by default we refuse to
-talk to anything that isn't loopback/LAN. A connection must explicitly set allow_remote
-to use a non-local endpoint. Every call is recorded in the Outbound Data Log (host + model
-only — never the prompt contents).
+Privacy: the assistant feeds the model your real coin data, so we refuse to talk to anything
+that isn't loopback (or LAN when BTT_ASSISTANT_ALLOW_LAN=1); see assistant_endpoint_allowed.
+Every call is recorded in the Outbound Data Log (host + model only — never the prompt contents).
 """
 from __future__ import annotations
 
@@ -111,12 +110,12 @@ def get_default(session: Session) -> LLMConnection | None:
 
 
 def add_connection(session: Session, *, name: str, provider: str, base_url: str, model: str,
-                   api_key: str = "", allow_remote: bool = False) -> LLMConnection:
+                   api_key: str = "") -> LLMConnection:
     provider = provider if provider in PROVIDERS else "ollama"
     first = session.scalar(select(LLMConnection)) is None
     conn = LLMConnection(
         name=name.strip() or "Local model", provider=provider, base_url=base_url.strip().rstrip("/"),
-        model=model.strip(), api_key=api_key.strip(), allow_remote=allow_remote, is_default=first,
+        model=model.strip(), api_key=api_key.strip(), is_default=first,
     )
     session.add(conn)
     session.commit()
@@ -134,8 +133,6 @@ def update_connection(session: Session, conn_id: int, **fields) -> LLMConnection
             setattr(conn, key, val.rstrip("/") if key == "base_url" else val)
     if conn.provider not in PROVIDERS:
         conn.provider = "ollama"
-    if "allow_remote" in fields:
-        conn.allow_remote = bool(fields["allow_remote"])
     session.commit()
     session.refresh(conn)
     return conn
@@ -203,7 +200,8 @@ def _endpoints(conn: LLMConnection) -> tuple[str, str]:
 
 
 def chat(conn: LLMConnection, messages: list[dict], timeout: float = 120.0) -> ChatResult:
-    """Send a chat completion. Refuses non-local endpoints unless allow_remote is set."""
+    """Send a chat completion. Refuses non-local endpoints: loopback only by default, or LAN
+    when BTT_ASSISTANT_ALLOW_LAN=1 (gate: assistant_endpoint_allowed)."""
     if not conn.model:
         return ChatResult(False, error="No model selected for this connection.")
     # Hard local-only: the assistant sends your real coin data, so by default it ONLY talks to

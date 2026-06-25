@@ -25,7 +25,8 @@ async def settings_page(request: Request, session: Session = Depends(get_session
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(
         request, "settings.html",
-        {"cfg": node_settings.get_config(session), "saved": False, "result": None,
+        {"cfg": (_cfg := node_settings.get_config(session)), "saved": False, "result": None,
+         "explorer_is_public": not node_settings.explorer_is_private(_cfg.mempool_url),
          "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session)},
     )
 
@@ -37,21 +38,21 @@ def _llm_section(request: Request, session: Session, **extra):
     return templates.TemplateResponse(request, "partials/llm_connections.html", ctx)
 
 
-def _transient_conn(provider: str, base_url: str, model: str, allow_remote: bool, api_key: str = ""):
+def _transient_conn(provider: str, base_url: str, model: str, api_key: str = ""):
     return LLMConnection(name="(test)", provider=(provider or "ollama").strip(),
                          base_url=(base_url or "").strip().rstrip("/"), model=(model or "").strip(),
-                         api_key=(api_key or "").strip(), allow_remote=allow_remote)
+                         api_key=(api_key or "").strip())
 
 
 @router.post("/settings/llm/add", response_class=HTMLResponse)
 async def llm_add(request: Request, name: str = Form(""), provider: str = Form("ollama"),
-                  base_url: str = Form(""), model: str = Form(""), allow_remote: bool = Form(False),
+                  base_url: str = Form(""), model: str = Form(""),
                   session: Session = Depends(get_session)):
     if not _allowed(request):
         return RedirectResponse("/", status_code=303)
     if base_url.strip():
         llm.add_connection(session, name=name, provider=provider, base_url=base_url,
-                           model=model, allow_remote=allow_remote)
+                           model=model)
     return _llm_section(request, session)
 
 
@@ -64,12 +65,12 @@ async def llm_edit_form(conn_id: int, request: Request, session: Session = Depen
 
 @router.post("/settings/llm/{conn_id}/edit", response_class=HTMLResponse)
 async def llm_edit(conn_id: int, request: Request, name: str = Form(""), provider: str = Form("ollama"),
-                   base_url: str = Form(""), model: str = Form(""), allow_remote: bool = Form(False),
+                   base_url: str = Form(""), model: str = Form(""),
                    session: Session = Depends(get_session)):
     if not _allowed(request):
         return RedirectResponse("/", status_code=303)
     llm.update_connection(session, conn_id, name=name, provider=provider, base_url=base_url,
-                          model=model, allow_remote=allow_remote)
+                          model=model)
     return _llm_section(request, session)
 
 
@@ -91,20 +92,20 @@ async def llm_delete(conn_id: int, request: Request, session: Session = Depends(
 
 @router.post("/settings/llm/test", response_class=HTMLResponse)
 async def llm_test(request: Request, provider: str = Form("ollama"), base_url: str = Form(""),
-                   model: str = Form(""), allow_remote: bool = Form(False),
+                   model: str = Form(""),
                    session: Session = Depends(get_session)):
     if not _allowed(request):
         return RedirectResponse("/", status_code=303)
-    result = llm.test_connection(_transient_conn(provider, base_url, model, allow_remote))
+    result = llm.test_connection(_transient_conn(provider, base_url, model))
     return templates.TemplateResponse(request, "partials/llm_test.html", {"result": result})
 
 
 @router.post("/settings/llm/models", response_class=HTMLResponse)
 async def llm_models(request: Request, provider: str = Form("ollama"), base_url: str = Form(""),
-                     allow_remote: bool = Form(False), session: Session = Depends(get_session)):
+                     session: Session = Depends(get_session)):
     if not _allowed(request):
         return RedirectResponse("/", status_code=303)
-    models = llm.list_models(_transient_conn(provider, base_url, "", allow_remote))
+    models = llm.list_models(_transient_conn(provider, base_url, ""))
     # Escape: model names come from the (user-pointed-at) server and land in HTML attributes.
     return HTMLResponse("".join(f'<option value="{escape(m)}"></option>' for m in models))
 
@@ -132,6 +133,7 @@ async def save_settings(
     return templates.TemplateResponse(
         request, "settings.html",
         {"cfg": cfg, "saved": True, "result": None, "outbound": outbound.recent(session),
+         "explorer_is_public": not node_settings.explorer_is_private(cfg.mempool_url),
          "llm_conns": llm.list_connections(session)},
     )
 

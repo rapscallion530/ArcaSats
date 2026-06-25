@@ -107,6 +107,19 @@ def _run_lightweight_migrations() -> None:
             "UPDATE transactions SET kind='sell' WHERE source LIKE 'xpub:%' AND kind='transfer_out' "
             "AND wallet_id IN (SELECT id FROM wallets WHERE onchain_mode='standalone')")
 
+    # Drop the obsolete llm_connections.allow_remote column. The assistant's locality is gated by
+    # assistant_endpoint_allowed()/BTT_ASSISTANT_ALLOW_LAN (services/llm.py), never this per-row
+    # flag, so the column is dead. DROP COLUMN needs SQLite >= 3.35; on an older engine we leave
+    # the (now-ignored) column rather than fail the migration. Runs in its OWN transaction so a
+    # failure can't roll back the steps above.
+    try:
+        with engine.begin() as conn:
+            cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(llm_connections)")}
+            if "allow_remote" in cols:
+                conn.exec_driver_sql("ALTER TABLE llm_connections DROP COLUMN allow_remote")
+    except Exception:  # noqa: BLE001  (pre-3.35 SQLite without DROP COLUMN — harmless to keep)
+        pass
+
 
 def get_session() -> Iterator[Session]:
     """FastAPI dependency yielding a session."""

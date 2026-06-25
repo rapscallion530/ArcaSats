@@ -14,8 +14,11 @@ model so auditors know what to scrutinize, and how to report issues.
 - **Minimal, auditable egress.** The only outbound network actions are:
   1. Queries to the user's **own** Electrum server (electrs/Fulcrum), preferably over Tor
      (`.onion`). The xpub string is never transmitted — only derived script hashes.
-  2. A public **BTC/USD price** feed (Coinbase Exchange candles) — only dates/times are
-     sent, never amounts, addresses, or balances. Gated by `BTT_ENABLE_NETWORK`.
+  2. A public **BTC/USD price** feed (Coinbase/Bitstamp candles). Requests are batched by
+     fixed **Mon–Sun week**: a fetch reveals only the *week* in which you had activity — never
+     the exact transaction time, amounts, addresses, or balances. Gated by `BTT_ENABLE_NETWORK`
+     (off by default). Using your own mempool instance as the price source avoids the third
+     party entirely.
   3. An **optional local LLM** endpoint the user configures (off by default). The assistant
      talks ONLY to a model on **this machine (loopback)** by default; HTTP redirects are
      blocked and the locality check resolves hostnames (no `.internal`→public bypass). A model

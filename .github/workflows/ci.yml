@@ -28,3 +28,5 @@ jobs:
         run: pip check
       - name: Run tests
         run: pytest -q
+      - name: Release hygiene check
+        run: python scripts/release_check.py

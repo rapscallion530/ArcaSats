@@ -35,6 +35,23 @@ def test_build_client_clearnet_vs_onion(session):
     assert c2.proxy_host == "127.0.0.1" and c2.proxy_port == 9150 and c2.use_ssl is False
 
 
+def test_explorer_is_private_classifies_hosts():
+    """The block-explorer privacy heuristic: local/own instances are private (no warning);
+    public explorers are flagged so the UI warns the txid would leak to a third party."""
+    priv = node_settings.explorer_is_private
+    # local / own instances -> private (no warning)
+    assert priv("") is True                          # no URL configured -> no links rendered
+    assert priv("http://localhost:3006") is True
+    assert priv("http://127.0.0.1:3006") is True
+    assert priv("http://192.168.1.50:3006") is True  # LAN
+    assert priv("http://umbrel.local") is True       # mDNS
+    assert priv("http://abcd1234efgh.onion") is True  # Tor
+    # public explorers -> NOT private (warn)
+    assert priv("https://mempool.space") is False
+    assert priv("https://blockstream.info/tx") is False
+    assert priv("https://8.8.8.8") is False          # public IP literal
+
+
 def test_build_client_none_when_unset(session):
     node_settings.save_config(session, electrum_host="", electrum_port=50001,
                               use_ssl=False, use_tor=False, tor_host="127.0.0.1", tor_port=9050)

@@ -303,8 +303,8 @@ class OutboundLog(Base):
 class LLMConnection(Base):
     """A user-defined connection to a LOCAL large language model (Ollama or any
     OpenAI-compatible endpoint, e.g. LM Studio / llama.cpp). Used by the optional
-    read-only "Ask your data" assistant. Off until the user adds one. `allow_remote`
-    must be explicitly enabled to send data to a non-loopback/LAN endpoint."""
+    read-only "Ask your data" assistant. Off until the user adds one. The assistant only
+    talks to a loopback endpoint (or LAN when BTT_ASSISTANT_ALLOW_LAN=1); see services/llm.py."""
     __tablename__ = "llm_connections"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -313,7 +313,6 @@ class LLMConnection(Base):
     base_url: Mapped[str] = mapped_column(String(255), default="http://127.0.0.1:11434")
     model: Mapped[str] = mapped_column(String(120), default="")
     api_key: Mapped[str] = mapped_column(String(255), default="")        # usually blank for local
-    allow_remote: Mapped[bool] = mapped_column(default=False)
     is_default: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
