@@ -71,6 +71,25 @@ custodial omnibus sources with no output-level visibility). See `app/services/co
   account's FIFO/LIFO/HIFO ordering applies. Specific identification **by class**, no UTXO link
   required; the gain math is unchanged.
 
+## Address-based fuzzy-hop detection (reconciliation inbox)
+
+A self-transfer that routes through an address ArcaSats doesn't track (known → unknown → known)
+has two on-chain txs with *different* txids, so the shared-txid auto-reconciler can't link them.
+The reconciliation inbox proposes these for the user to confirm. Detection is **address-first**:
+the xpub scanner records, per our transaction, the foreign address one hop away — a spend's
+**destination** (`HopAddress` direction `"out"`, free: it's a vout we already fetch) and an
+inflow's **funder** (`"in"`, fetched from each input's previous tx, since a vin carries only
+`txid:vout`). `costbasis.suggest_transfers` then matches an outflow whose destination address
+later **funds** an inflow — the same unknown intermediary — regardless of how much the sats or the
+timing drifted. Amount+date remains a fallback for outflows with no address data (e.g. an exchange
+CSV withdrawal that was never on-chain-scanned).
+
+This stays **inward**: we only ever look at addresses *directly adjacent* to the user's own coins
+(one hop), never a deeper walk through third-party addresses (that would be the out-of-scope
+outward tracing). The captured addresses are local-only and never egressed. A confirmed match
+carries basis **coarsely** (single lot) — a fuzzy hop never gets the precise shared-txid fragment
+rebuild, and is a break by default until the user vouches for it.
+
 ## Phase 3 (deferred) — UTXO-outpoint specific identification
 
 Disposing of *literal* chosen coins (not just a KYC class) is the only part that genuinely needs

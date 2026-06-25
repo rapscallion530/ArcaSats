@@ -11,23 +11,24 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import TxKind
-from app.services import costbasis
+from app.services import costbasis, node_settings
 from app.templating import templates
 
 router = APIRouter()
 
 
+def _ctx(session: Session):
+    return {"suggestions": costbasis.suggest_transfers(session), "labels": TxKind.LABELS,
+            "mempool_url": node_settings.get_config(session).mempool_url}
+
+
 def _list(request: Request, session: Session):
-    suggestions = costbasis.suggest_transfers(session)
-    return templates.TemplateResponse(request, "partials/reconcile_list.html",
-                                      {"suggestions": suggestions, "labels": TxKind.LABELS})
+    return templates.TemplateResponse(request, "partials/reconcile_list.html", _ctx(session))
 
 
 @router.get("/reconcile", response_class=HTMLResponse)
 async def reconcile_inbox(request: Request, session: Session = Depends(get_session)):
-    suggestions = costbasis.suggest_transfers(session)
-    return templates.TemplateResponse(request, "reconcile.html",
-                                      {"suggestions": suggestions, "labels": TxKind.LABELS})
+    return templates.TemplateResponse(request, "reconcile.html", _ctx(session))
 
 
 @router.post("/reconcile/confirm", response_class=HTMLResponse)

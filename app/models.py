@@ -113,6 +113,7 @@ class Wallet(Base):
     account: Mapped[Account] = relationship(back_populates="wallets")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="wallet", cascade="all, delete-orphan")
     utxos: Mapped[list[Utxo]] = relationship(cascade="all, delete-orphan")
+    hop_addresses: Mapped[list[HopAddress]] = relationship(cascade="all, delete-orphan")
 
 
 class Transaction(Base):
@@ -251,6 +252,41 @@ class Utxo(Base):
     @property
     def spent(self) -> bool:
         return self.spent_txid is not None
+
+
+class HopAddress(Base):
+    """A foreign (non-owned) address sitting one hop from one of our on-chain transactions —
+    captured during an xpub/descriptor scan to detect "known -> unknown -> known" self-transfers
+    by ADDRESS rather than by amount+date (which breaks when a hop changes the sats or spans a
+    long time). This is chain analysis turned INWARD: we only record addresses directly adjacent
+    to the user's own coins (a spend's destination, or an inflow's funder) — never a deeper walk
+    through third-party addresses. Local-only; never egressed. See costbasis.suggest_transfers.
+
+    direction:
+      "out" -> a DESTINATION address of one of our outflows (where coins left to). Free to
+               capture: it's a vout of a tx we already fetch during the scan.
+      "in"  -> a FUNDER address of one of our inflows (who paid us). Requires fetching the
+               input's previous tx during the scan (a vin only carries txid:vout, not an address).
+    A later inflow whose "in" address equals an earlier outflow's "out" address is the same
+    unknown intermediary -> a candidate self-transfer the user can confirm in the inbox.
+    """
+    __tablename__ = "hop_addresses"
+    __table_args__ = (
+        UniqueConstraint("wallet_id", "txid", "direction", "address", name="uq_hop_wallet_tx_dir_addr"),
+        Index("ix_hop_address", "address"),   # the out<->in join key
+        Index("ix_hop_account", "account_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"), index=True)
+
+    txid: Mapped[str] = mapped_column(String(80))          # our transaction this endpoint belongs to
+    direction: Mapped[str] = mapped_column(String(3))      # "out" (destination) / "in" (funder)
+    address: Mapped[str] = mapped_column(String(120))      # the foreign address
+    value_sats: Mapped[int] = mapped_column(default=0)     # that output/input's value (display)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
 
 class PricePoint(Base):

@@ -5,6 +5,19 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — address-based fuzzy-hop detection
+
+The reconciliation inbox matched candidate self-transfers purely on amount + date (±0.002 BTC,
+≤7 days) — fragile when a hop changes the sats (fees/partials/batching) or spans a long time.
+Now it's **address-first**: the xpub scanner records the foreign address one hop from each of our
+txs (a spend's destination — free, from the vout we already fetch; an inflow's funder — via a
+prevtx fetch, since a vin carries only `txid:vout`), and `suggest_transfers` matches a
+known→unknown→known hop by that shared intermediary address, robust to amount/time drift
+(amount+date kept as a fallback). New `hop_addresses` table + migration `0004`; new endpoints
+populate on the next Sync. Stays inward-only (one hop from your own coins; addresses are local,
+never egressed); a confirmed fuzzy hop still carries basis coarsely (no fragment rebuild). New
+inbox UI shows the match reason + the shared address. (164 tests.)
+
 ## Unreleased — KYC/UTXO lot engine (audit #8)
 
 KYC provenance through the cost-basis engine — Layer A in full, plus the start of Layer B.

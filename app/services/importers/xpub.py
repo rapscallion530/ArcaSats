@@ -23,7 +23,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SATS_PER_BTC, Account, Transaction, TxKind, Utxo, Wallet
+from app.models import SATS_PER_BTC, Account, HopAddress, Transaction, TxKind, Utxo, Wallet
 from app.services import transactions as tx_svc
 from app.services.bip32 import derive_addresses, key_kind
 from app.services.electrum import ElectrumLike
@@ -74,9 +74,20 @@ class OnChainUtxo:
 
 
 @dataclass
+class HopEndpoint:
+    """A foreign address one hop from one of our txs (for known->unknown->known detection).
+    direction "out" = a destination of our outflow; "in" = a funder of our inflow."""
+    txid: str
+    direction: str
+    address: str
+    value_sats: int = 0
+
+
+@dataclass
 class ScanResult:
     txs: list[OnChainTx] = field(default_factory=list)
     utxos: list[OnChainUtxo] = field(default_factory=list)
+    endpoints: list[HopEndpoint] = field(default_factory=list)
     addresses_scanned: int = 0
     error: str = ""
     script_type: str = ""
@@ -178,6 +189,34 @@ def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
             continue
         result.txs.append(OnChainTx(txid=txid, timestamp=ts_by_tx[txid], net_sats=net,
                                     height=height, address=rep_addr.get(txid, "")))
+        # Capture the foreign address one hop away, for address-based "known -> unknown -> known"
+        # self-transfer detection (costbasis.suggest_transfers). Inward-only: just the address
+        # directly adjacent to our coins, never a deeper walk.
+        if net < 0:
+            # Outflow: every output NOT paying us is a destination (already-fetched vout — free).
+            for vout in get_tx(txid).get("vout", []):
+                a = _vout_address(vout)
+                if a and a not in addr_meta:
+                    result.endpoints.append(HopEndpoint(
+                        txid=txid, direction="out", address=a,
+                        value_sats=_val_to_sats(vout.get("value", 0))))
+        else:
+            # Inflow: each input NOT ours is a funder — its address lives in the prev tx's vout,
+            # so we fetch that prev tx (a vin only carries txid:vout). Best-effort; skip on error.
+            for vin in get_tx(txid).get("vin", []):
+                ptxid, pvout = vin.get("txid"), vin.get("vout", 0)
+                if not ptxid or created.get((ptxid, pvout)) is not None:
+                    continue  # coinbase, or one of our own inputs (already recorded)
+                try:
+                    pvouts = get_tx(ptxid).get("vout", [])
+                except Exception:  # noqa: BLE001 — prev tx unavailable; funder simply unknown
+                    continue
+                if pvout < len(pvouts):
+                    a = _vout_address(pvouts[pvout])
+                    if a and a not in addr_meta:
+                        result.endpoints.append(HopEndpoint(
+                            txid=txid, direction="in", address=a,
+                            value_sats=_val_to_sats(pvouts[pvout].get("value", 0))))
 
 
 def scan_xpub(
@@ -245,6 +284,25 @@ def persist_utxos(session: Session, wallet: Wallet, utxos: list[OnChainUtxo]) ->
     session.commit()
 
 
+def persist_endpoints(session: Session, wallet: Wallet, endpoints: list[HopEndpoint]) -> None:
+    """Upsert the wallet's hop-address endpoints, keyed (wallet, txid, direction, address).
+    Idempotent across re-syncs (refreshes value, never duplicates). On-chain history is
+    append-only, so we never delete here."""
+    existing = {
+        (e.txid, e.direction, e.address): e
+        for e in session.scalars(select(HopAddress).where(HopAddress.wallet_id == wallet.id))
+    }
+    for ep in endpoints:
+        row = existing.get((ep.txid, ep.direction, ep.address))
+        if row is None:
+            session.add(HopAddress(
+                account_id=wallet.account_id, wallet_id=wallet.id, txid=ep.txid,
+                direction=ep.direction, address=ep.address, value_sats=ep.value_sats))
+        else:
+            row.value_sats = ep.value_sats
+    session.commit()
+
+
 def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_limit: int | None = None):
     """Scan a wallet (single-sig xpub OR multisig descriptor) and persist its on-chain activity.
     Returns an ImportResult (imported / skipped / errors)."""
@@ -270,6 +328,7 @@ def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_l
         session.commit()
 
     persist_utxos(session, wallet, scan.utxos)
+    persist_endpoints(session, wallet, scan.endpoints)
 
     mode = wallet.onchain_mode or "standalone"
     src = f"xpub:{wallet.id}"

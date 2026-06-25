@@ -22,7 +22,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SATS_PER_BTC, Account, Transaction, TxKind
+from app.models import SATS_PER_BTC, Account, HopAddress, Transaction, TxKind
 from app.services import transactions as tx_svc
 
 
@@ -631,9 +631,15 @@ class TransferSuggestion:
     days_apart: int
     out_account: str = ""
     in_account: str = ""
+    match_reason: str = "amount+date"   # "shared address" | "amount+date"
+    shared_address: str = ""            # the unknown intermediary, for a "shared address" match
 
     @property
     def confidence(self) -> str:
+        # A shared intermediary address is a strong signal on its own — the sats and timing can
+        # drift a lot across a real hop, so they don't downgrade it.
+        if self.match_reason == "shared address":
+            return "high"
         if self.amount_delta_sats <= 10_000 and self.days_apart <= 1:
             return "high"
         if self.amount_delta_sats <= 100_000 and self.days_apart <= 3:
@@ -643,10 +649,18 @@ class TransferSuggestion:
 
 def suggest_transfers(session: Session) -> list[TransferSuggestion]:
     """Propose same-owner outflow→inflow pairs that look like one self-transfer split across two
-    transactions with different txids. High precision over recall: one best inflow per outflow,
-    inside a tight amount+time window, excluding anything already proven (shared txid) or already
-    adjudicated (transfer_reviewed) or already carrying basis. The user confirms or rejects each.
-    """
+    transactions with different txids (a known→unknown→known hop). The user confirms or rejects.
+
+    Two signals, address-first:
+      1. **Shared intermediary address** — your outflow paid an unknown address that later funded
+         your inflow (`HopAddress` "out"/"in" captured during the xpub scan). Robust to amount and
+         time drift — the whole point. This is the preferred match.
+      2. **Amount + date** fallback — for outflows with no address match (e.g. an exchange CSV
+         withdrawal that was never on-chain-scanned, so has no hop addresses): one best inflow in a
+         tight ±0.002 BTC / 7-day window.
+
+    Excludes anything already proven (shared txid), adjudicated (`transfer_reviewed`), or already
+    carrying basis. One best inflow per outflow; never auto-applied."""
     accts = {a.id: a for a in session.scalars(select(Account)).all()}
     owner_of = {aid: _norm_owner(a.owner) for aid, a in accts.items()}
     internal = internal_txids(session)
@@ -661,17 +675,57 @@ def suggest_transfers(session: Session) -> list[TransferSuggestion]:
                   key=lambda t: (t.timestamp, t.id or 0))
     ins = [t for t in rows if t.kind in _INFLOW_SUGGEST and eligible(t) and t.carried_basis_usd is None]
 
+    # Hop-address index: our outflows' destination addresses and inflows' funder addresses.
+    out_addrs: dict[str, set] = defaultdict(set)
+    in_addrs: dict[str, set] = defaultdict(set)
+    for h in session.scalars(select(HopAddress)).all():
+        (out_addrs if h.direction == "out" else in_addrs)[h.txid].add(h.address)
+
     used_in: set[int] = set()
+    used_out: set[int] = set()
     out: list[TransferSuggestion] = []
+
+    def pairable(o: Transaction, i: Transaction) -> bool:
+        return (i.id not in used_in
+                and (o.account_id, o.wallet_id) != (i.account_id, i.wallet_id)
+                and owner_of.get(o.account_id) == owner_of.get(i.account_id)
+                and not (o.txid and i.txid and o.txid == i.txid))  # shared txid -> auto reconciler
+
+    def emit(o: Transaction, i: Transaction, reason: str, shared: str = "") -> None:
+        used_in.add(i.id)
+        used_out.add(o.id)
+        out.append(TransferSuggestion(
+            out_tx=o, in_tx=i, amount_delta_sats=abs(o.amount_sats - i.amount_sats),
+            days_apart=(i.timestamp - o.timestamp).days,
+            out_account=accts[o.account_id].name, in_account=accts[i.account_id].name,
+            match_reason=reason, shared_address=shared))
+
+    # Phase 1 — shared intermediary address (amount/time agnostic; inflow must follow the outflow).
     for o in outs:
+        o_dests = out_addrs.get(o.txid or "", set())
+        if not o_dests:
+            continue
+        best, best_key, best_shared = None, None, ""
+        for i in ins:
+            if not pairable(o, i) or i.timestamp < o.timestamp:
+                continue
+            shared = o_dests & in_addrs.get(i.txid or "", set())
+            if not shared:
+                continue
+            key = (i.timestamp - o.timestamp, -len(shared))  # nearest in time, then most overlap
+            if best_key is None or key < best_key:
+                best, best_key, best_shared = i, key, sorted(shared)[0]
+        if best is not None:
+            emit(o, best, "shared address", best_shared)
+
+    # Phase 2 — amount+date fallback for outflows the address pass didn't match.
+    for o in outs:
+        if o.id in used_out:
+            continue
         best, best_score = None, None
         for i in ins:
-            if i.id in used_in or (o.account_id, o.wallet_id) == (i.account_id, i.wallet_id):
+            if not pairable(o, i):
                 continue
-            if owner_of.get(o.account_id) != owner_of.get(i.account_id):
-                continue
-            if o.txid and i.txid and o.txid == i.txid:
-                continue  # shared txid -> handled by the auto reconciler, not a suggestion
             if not (o.timestamp <= i.timestamp <= o.timestamp + _SUGGEST_WINDOW):
                 continue
             delta = abs(o.amount_sats - i.amount_sats)
@@ -681,11 +735,8 @@ def suggest_transfers(session: Session) -> list[TransferSuggestion]:
             if best_score is None or score < best_score:
                 best, best_score = i, score
         if best is not None:
-            used_in.add(best.id)
-            out.append(TransferSuggestion(
-                out_tx=o, in_tx=best, amount_delta_sats=abs(o.amount_sats - best.amount_sats),
-                days_apart=(best.timestamp - o.timestamp).days,
-                out_account=accts[o.account_id].name, in_account=accts[best.account_id].name))
+            emit(o, best, "amount+date")
+
     out.sort(key=lambda s: (s.out_tx.timestamp, s.out_tx.id or 0))
     return out
 

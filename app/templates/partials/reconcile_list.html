@@ -7,9 +7,17 @@
         {% set c = s.confidence %}
         <span class="text-[10px] px-1.5 py-0.5 rounded-full
                      {% if c == 'high' %}bg-surfaceblue text-gain{% elif c == 'medium' %}bg-surfaceblue text-headingalt{% else %}bg-surfaceblue text-muted{% endif %}">{{ c }} match</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-surfaceblue text-muted ml-1">{{ s.match_reason }}</span>
         <span class="text-muted ml-2">Δ {{ s.amount_delta_sats|btcamt }} <span class="unit">BTC</span>, {{ s.days_apart }} day(s) apart</span>
       </div>
     </div>
+    {% if s.shared_address %}
+    <div class="text-xs text-muted mt-2">
+      via shared address
+      {% if mempool_url %}<a href="{{ mempool_url }}/address/{{ s.shared_address }}" target="_blank" rel="noopener" class="font-mono underline hover:text-heading">{{ s.shared_address }}</a> <span aria-hidden="true">&#8599;</span>{% else %}<span class="font-mono text-ink">{{ s.shared_address }}</span>{% endif %}
+      — coins left to it and later funded the inflow (an intermediary not loaded as a wallet).
+    </div>
+    {% endif %}
 
     <div class="grid sm:grid-cols-[1fr_auto_1fr] gap-3 items-center mt-3">
       <!-- Outflow -->
