@@ -100,29 +100,30 @@ def test_fragment_rebuild_tacks_holding_period_and_kyc(session):
     assert d.kyc_origin == "KYC"                 # source label, not B's "non-KYC"
 
 
-def test_fragment_rebuild_multi_hop_preserves_origin(session):
-    """A→B→C: the original acquisition date and KYC label survive two hops."""
-    A = acc.create_account(session, name="A", label_kind="KYC")
-    B = acc.create_account(session, name="B")
-    C = acc.create_account(session, name="C")
-    txsvc.add_transaction(session, account_id=A.id, kind=TxKind.BUY,
+def test_fragment_rebuild_many_hops_preserve_origin(session):
+    """Many exact shared-txid hops (A→B→C→D), each between two of the user's own wallets, carry
+    cost basis the whole way: the original acquisition date and KYC label survive every hop."""
+    accts = [acc.create_account(session, name=n, label_kind=("KYC" if n == "A" else ""))
+             for n in ("A", "B", "C", "D")]
+    txsvc.add_transaction(session, account_id=accts[0].id, kind=TxKind.BUY,
                           timestamp=dt.datetime(2023, 5, 1), amount_sats=BTC,
                           fiat_value=Decimal("25000"))
-    for acct_id, txid in ((A.id, "H1"), (B.id, "H1")):
-        kind = TxKind.TRANSFER_OUT if acct_id == A.id else TxKind.TRANSFER_IN
-        txsvc.add_transaction(session, account_id=acct_id, kind=kind,
-                              timestamp=dt.datetime(2023, 6, 1), amount_sats=BTC,
-                              txid=txid, external_id=f"{txid}:{'out' if kind == TxKind.TRANSFER_OUT else 'in'}")
-    for acct_id, txid in ((B.id, "H2"), (C.id, "H2")):
-        kind = TxKind.TRANSFER_OUT if acct_id == B.id else TxKind.TRANSFER_IN
-        txsvc.add_transaction(session, account_id=acct_id, kind=kind,
-                              timestamp=dt.datetime(2023, 7, 1), amount_sats=BTC,
-                              txid=txid, external_id=f"{txid}:{'out' if kind == TxKind.TRANSFER_OUT else 'in'}")
+    # Three hops: A→B (H1), B→C (H2), C→D (H3) — each a shared-txid self-transfer.
+    for hop, (src, dst) in enumerate(zip(accts, accts[1:]), start=1):
+        txid = f"H{hop}"
+        ts = dt.datetime(2023, 5 + hop, 1)
+        txsvc.add_transaction(session, account_id=src.id, kind=TxKind.TRANSFER_OUT, timestamp=ts,
+                              amount_sats=BTC, txid=txid, external_id=f"{txid}:out")
+        txsvc.add_transaction(session, account_id=dst.id, kind=TxKind.TRANSFER_IN, timestamp=ts,
+                              amount_sats=BTC, txid=txid, external_id=f"{txid}:in")
     costbasis.reconcile_internal_transfers(session)
-    rc = costbasis.compute_account(session, C.id)
-    assert rc.holding_basis_usd == Decimal("25000.00")
-    assert rc.open_lots and rc.open_lots[0].kyc_origin == "KYC"
-    assert rc.open_lots[0].acquired.year == 2023 and rc.open_lots[0].acquired.month == 5
+    # A, B, C are emptied; D holds the coin with the ORIGINAL basis/date/KYC carried through 3 hops.
+    for empty in accts[:3]:
+        assert costbasis.compute_account(session, empty.id).holding_sats == 0
+    rd = costbasis.compute_account(session, accts[3].id)
+    assert rd.holding_basis_usd == Decimal("25000.00")
+    assert rd.open_lots and rd.open_lots[0].kyc_origin == "KYC"
+    assert rd.open_lots[0].acquired.year == 2023 and rd.open_lots[0].acquired.month == 5
 
 
 def test_merge_kyc_conservative():
