@@ -250,6 +250,27 @@ def test_lot_methods_fifo_lifo_hifo():
     assert hifo.holding_basis_usd == Decimal("20000.00")
 
 
+def test_hifo_medium_ledger_uses_fast_selector():
+    import time
+
+    txs = []
+    tid = 1
+    for i in range(6000):
+        txs.append(tx(tid, TxKind.BUY, f"2025-01-{(i % 28) + 1:02d}", "0.001", usd=str(20 + (i % 200))))
+        tid += 1
+        if i % 4 == 0:
+            txs.append(tx(tid, TxKind.SELL, f"2025-02-{(i % 28) + 1:02d}", "0.00025", usd="25"))
+            tid += 1
+
+    start = time.perf_counter()
+    result = costbasis.compute(txs, method="hifo")
+    elapsed = time.perf_counter() - start
+
+    assert result.disposals
+    assert result.open_lots
+    assert elapsed < 2.0
+
+
 def test_exchange_to_onchain_amount_date_match_carries(session):
     import datetime as dt
     from app.services import accounts as acc

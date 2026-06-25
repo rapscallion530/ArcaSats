@@ -7,7 +7,9 @@ model so auditors know what to scrutinize, and how to report issues.
 ## Threat model & design goals
 
 - **Local-only by default.** All user data lives in a single SQLite file (`data/btt.sqlite`)
-  on the user's machine. The app binds to `127.0.0.1` by default.
+  on the user's machine. The app binds to `127.0.0.1` by default. With `BTT_ENABLE_NETWORK=0`
+  (the default) and no Electrum node or LLM configured, the app makes **no network requests at
+  all** — every outbound action listed below is opt-in. (Regression-tested in `tests/test_egress.py`.)
 - **Watch-only.** ArcaSats never asks for, stores, or handles private keys or seed phrases.
   It ingests extended **public** keys (xpub/ypub/zpub) and addresses. The worst-case
   compromise is a **privacy** loss (someone learning your addresses/balances), not theft.

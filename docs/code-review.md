@@ -45,7 +45,7 @@ and the `accessible_*` helpers in `services/accounts.py` are the enforcement poi
 ## Running the checks
 
 ```
-pytest -q                          # 141 tests; crypto vectors, cost-basis, importers, auth,
+pytest -q                          # 143 tests; crypto vectors, cost-basis, importers, auth,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)
@@ -63,7 +63,9 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
   (not enforced, since that would break legitimate multi-xpub self-custody). A true
   per-wallet/UTXO lot engine is the alternative.
 - **UTXO-level / multi-asset lots** — adding an `asset` column (default `BTC`) now would avoid a
-  painful migration later; the HIFO selector is O(lots²) and would need a heap at UTXO scale.
+  painful migration later. (HIFO lot selection is now heap-backed — O(n log n) — so it already
+  scales to large ledgers; see `_dispose`/`hifo_heap` in `costbasis.py` and the perf regression
+  test.)
 - **Filing readiness** — no missing-data checklist yet, nor explicit
   gift/donation/mining/inheritance/lost-coin classifications.
 

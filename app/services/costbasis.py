@@ -12,6 +12,7 @@ All USD math uses Decimal. BTC amounts are integer sats.
 from __future__ import annotations
 
 import datetime as dt
+import heapq
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -191,6 +192,7 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
     """
     res = CostBasisResult()
     lots: list[Lot] = []
+    hifo_heap: list[tuple[Decimal, int, Lot]] = []
     method = method if method in LOT_METHODS else "fifo"
     internal = internal_txids or set()
     if account_internal_within is not None:
@@ -222,30 +224,43 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
                         f"acquisition cost so gains compute correctly."
                     )
             if tx.amount_sats > 0:
-                lots.append(Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis, source=tx.source))
+                lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis, source=tx.source)
+                lots.append(lot)
+                if method == "hifo":
+                    rate = (basis / tx.amount_sats) if tx.amount_sats else Decimal("0")
+                    heapq.heappush(hifo_heap, (-rate, len(lots), lot))
 
         elif tx.kind in (TxKind.SELL, TxKind.SPEND):
             proceeds = (tx.fiat_value or Decimal("0"))
             if tx.kind == TxKind.SELL and tx.fiat_fee:
                 proceeds -= tx.fiat_fee
-            _dispose(lots, tx, proceeds, res, realize=True, method=method)
+            _dispose(lots, tx, proceeds, res, realize=True, method=method, hifo_heap=hifo_heap)
 
         elif tx.kind == TxKind.TRANSFER_OUT:
-            _dispose(lots, tx, Decimal("0"), res, realize=False, method=method)
+            _dispose(lots, tx, Decimal("0"), res, realize=False, method=method, hifo_heap=hifo_heap)
         # FEE: ignored for basis
 
-    res.open_lots = list(lots)
+    res.open_lots = [lot for lot in lots if lot.sats > 0]
     return res
 
 
 def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasisResult,
-             realize: bool, method: str = "fifo") -> None:
+             realize: bool, method: str = "fifo",
+             hifo_heap: list[tuple[Decimal, int, Lot]] | None = None) -> None:
     need = tx.amount_sats
     total = need
     consumed_basis = Decimal("0")
     while need > 0 and lots:
-        idx = _select_index(lots, method)
-        lot = lots[idx]
+        idx = None
+        if method == "hifo" and hifo_heap is not None:
+            while hifo_heap and hifo_heap[0][2].sats <= 0:
+                heapq.heappop(hifo_heap)
+            if not hifo_heap:
+                break
+            lot = hifo_heap[0][2]
+        else:
+            idx = _select_index(lots, method)
+            lot = lots[idx]
         take = min(lot.sats, need)
         basis_portion = (lot.basis_usd * Decimal(take) / Decimal(lot.sats)) if lot.sats else Decimal("0")
         consumed_basis += basis_portion
@@ -266,7 +281,10 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
         lot.basis_usd -= basis_portion
         need -= take
         if lot.sats <= 0:
-            del lots[idx]
+            if method == "hifo" and hifo_heap is not None:
+                heapq.heappop(hifo_heap)
+            elif idx is not None:
+                del lots[idx]
 
     if need > 0:
         # Disposed more than we have lots for — missing acquisition history. We record the
