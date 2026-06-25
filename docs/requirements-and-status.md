@@ -30,7 +30,7 @@ Comparing the Codex-generated requirements (2026-06-17) against what's built. Le
 14. UX — 🟡 dashboard/accounts/tax + node widget; ❌ first-run wizard, timeline, wallet map, UTXO explorer, reconciliation/missing-data inboxes.
 
 ## Built beyond the list
-Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, 139 tests.
+Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, 140 tests.
 
 ## Assessment of the spec
 - **Agree** with ~90%: privacy model, electrs/Tor, gift handling, FIFO default, reconciliation, 1099-DA caution, auditability, immutable pricing.
@@ -48,7 +48,7 @@ Single-user (optional app-wide password lock), in-app node settings (Sparrow-sty
 5. ✅ **Audit / "explain this gain/loss"** — open lots + per-disposal lot trace + needs-attention warnings.
 6. ❌ **UTXO-level lot engine — deliberately deferred.** Rationale: it's a major architectural rewrite
    (per-UTXO lots, change-output basis allocation, merge/split graph, CoinJoin classification) that would
-   destabilize a working, 139-test app, for marginal benefit to a DCA/low-volume holder. Rev. Proc. 2024-28's
+   destabilize a working, 140-test app, for marginal benefit to a DCA/low-volume holder. Rev. Proc. 2024-28's
    unit is the **wallet/account**, which we already track, and mainstream tools operate at this level too.
    Revisit only if the user needs coin-control/CoinJoin-grade lot tracking. Current model: per-account FIFO/
    LIFO/HIFO over net per-wallet movements, with documented transfers + basis carry.

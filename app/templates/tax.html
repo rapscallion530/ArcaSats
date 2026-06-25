@@ -5,8 +5,15 @@
 <div class="max-w-[1160px] mx-auto px-5 py-10 space-y-8">
   <div>
     <h1 class="text-2xl text-heading">Tax forms</h1>
-    <p class="text-muted text-sm mt-1">US Form 8949 &amp; Schedule D, generated per account with per-account FIFO.</p>
+    <p class="text-muted text-sm mt-1">US Form 8949 &amp; Schedule D, generated per account with per-account FIFO. <strong>Draft records for your review</strong> — not a filed return.</p>
   </div>
+
+  {% if flags %}
+  <div class="rounded-card border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
+    <div class="font-medium mb-1">Filing readiness</div>
+    <ul class="list-disc list-inside space-y-1">{% for f in flags %}<li>{{ f.message }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
 
   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
     {% for s in summaries %}
@@ -23,6 +30,6 @@
     {% endfor %}
   </div>
 
-  <p class="text-xs text-muted">Not tax advice. Verify against current IRS guidance before filing.</p>
+  <p class="text-xs text-muted">These are <strong>draft records for review</strong>, not a filed return or tax advice. Verify against current IRS guidance (Rev. Proc. 2024-28, Form 1099-DA reconciliation) before filing.</p>
 </div>
 {% endblock %}

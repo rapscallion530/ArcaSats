@@ -45,7 +45,7 @@ the whole instance behind one password (an HMAC-signed unlock cookie). The gate 
 ## Running the checks
 
 ```
-pytest -q                          # 139 tests; crypto vectors, cost-basis, importers, lock,
+pytest -q                          # 140 tests; crypto vectors, cost-basis, importers, lock,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)
@@ -66,8 +66,10 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
   painful migration later. (HIFO lot selection is now heap-backed — O(n log n) — so it already
   scales to large ledgers; see `_dispose`/`hifo_heap` in `costbasis.py` and the perf regression
   test.)
-- **Filing readiness** — no missing-data checklist yet, nor explicit
-  gift/donation/mining/inheritance/lost-coin classifications.
+- **Filing readiness** — a readiness panel now flags missing/estimated USD values + unmatched
+  self-transfers on the tax page and 8949, the 8949 is framed as a *draft*, and the CSV carries
+  a methodology/provenance footer (lot method + price source). Still not modeled: explicit
+  gift/donation/mining/inheritance/lost-coin classifications, and per-row price provenance.
 
 ### Schema / migrations
 - **Migrations: Alembic** ✅ — the schema is versioned under `alembic/` and applied at startup

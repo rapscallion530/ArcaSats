@@ -40,6 +40,31 @@ def test_csv_contains_schedule_d():
     assert "25000.00" in csv_text  # net gain
 
 
+def test_readiness_flags():
+    from app.models import Transaction, TxKind
+    from app.services.costbasis import CostBasisResult
+    txs = [
+        # taxable sell with no USD value -> "warn"
+        Transaction(id=1, account_id=1, kind=TxKind.SELL, timestamp=dt.datetime(2025, 1, 1),
+                    amount_sats=1000, fiat_value=None),
+        # a feed estimate -> "info"
+        Transaction(id=2, account_id=1, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 2),
+                    amount_sats=1000, fiat_value=Decimal("100"), fiat_source="estimate"),
+        # an actual value -> contributes no flag
+        Transaction(id=3, account_id=1, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 3),
+                    amount_sats=1000, fiat_value=Decimal("100"), fiat_source="actual"),
+    ]
+    cb = CostBasisResult(warnings=["transfer in on 2025-01-01 has no cost basis"])
+    flags = taxforms.readiness_flags(txs, cb, price_source="coinbase", unreconciled=2)
+    msgs = " ".join(f.message for f in flags)
+    assert "no USD value" in msgs           # missing-price flag
+    assert "ESTIMATES" in msgs              # estimate flag (with source)
+    assert "unmatched self-transfer" in msgs  # reconciliation flag
+    assert "no cost basis" in msgs          # engine warning passed through
+    # Clean data with nothing outstanding -> no flags at all.
+    assert taxforms.readiness_flags([txs[2]], CostBasisResult(), price_source="coinbase") == []
+
+
 def test_8949_routes(client):
     import re
     client.post("/accounts", data={"name": "TaxAcct"})

@@ -72,6 +72,37 @@ def years_present(result: CostBasisResult) -> list[int]:
     return sorted({d.date.year for d in result.disposals})
 
 
+@dataclass
+class ReadinessFlag:
+    level: str  # "warn" (likely-wrong figure) | "info" (verify / awaiting review)
+    message: str
+
+
+_TAXABLE_KINDS = (TxKind.SELL, TxKind.SPEND, TxKind.BUY, TxKind.INCOME)
+
+
+def readiness_flags(txs: list[Transaction], cb: CostBasisResult, *, price_source: str = "",
+                    unreconciled: int = 0) -> list[ReadinessFlag]:
+    """Filing-readiness checklist — data-quality issues to resolve before treating the 8949 as
+    final. Advisory only: the output is a DRAFT for review, not a filed return. Combines simple
+    transaction-provenance checks with the cost-basis engine's own warnings."""
+    flags: list[ReadinessFlag] = []
+    missing = sum(1 for t in txs if t.kind in _TAXABLE_KINDS and t.fiat_value is None)
+    if missing:
+        flags.append(ReadinessFlag("warn", f"{missing} taxable transaction(s) have no USD value — "
+                     "basis/proceeds may be wrong. Enter the actual price, or fetch prices."))
+    estimates = sum(1 for t in txs if (t.fiat_source or "") == "estimate")
+    if estimates:
+        src = f" ({price_source} spot)" if price_source else ""
+        flags.append(ReadinessFlag("info", f"{estimates} USD value(s) are price-feed ESTIMATES{src}, "
+                     "not your actual fills — verify the premium/spread before filing."))
+    if unreconciled:
+        flags.append(ReadinessFlag("info", f"{unreconciled} possible unmatched self-transfer(s) await "
+                     "review in the reconciliation inbox."))
+    flags.extend(ReadinessFlag("warn", w) for w in cb.warnings)
+    return flags
+
+
 def income_for_year(txs: list[Transaction], year: int) -> Decimal:
     total = Decimal("0")
     for t in txs:
@@ -80,7 +111,8 @@ def income_for_year(txs: list[Transaction], year: int) -> Decimal:
     return total.quantize(_CENTS)
 
 
-def to_csv(rows: list[Form8949Row], account_name: str, year: int | None) -> str:
+def to_csv(rows: list[Form8949Row], account_name: str, year: int | None,
+           *, lot_method: str = "fifo", price_source: str = "") -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([f"Form 8949 — {account_name}" + (f" — {year}" if year else "")])
@@ -97,4 +129,10 @@ def to_csv(rows: list[Form8949Row], account_name: str, year: int | None) -> str:
     w.writerow(["Schedule D — long-term total", "", "", "", f"{t['long']['proceeds']:.2f}",
                 f"{t['long']['basis']:.2f}", f"{t['long']['gain']:.2f}"])
     w.writerow(["Net capital gain/loss", "", "", "", "", "", f"{t['net_gain']:.2f}"])
+    # Methodology / provenance footer (report reproducibility): how these figures were derived.
+    w.writerow([])
+    w.writerow(["Method", f"per-account {lot_method.upper()} cost basis"])
+    w.writerow(["Price source", price_source or "(offline / manual values only)"])
+    w.writerow(["Disclaimer", "DRAFT 8949-format report — not a filed IRS form. USD values may be "
+                "price-feed estimates rather than actual fills; verify before filing."])
     return buf.getvalue()

@@ -77,10 +77,10 @@
     </div>
   </section>
 
-  {% if warnings %}
+  {% if flags %}
   <div class="rounded-card border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
-    <div class="font-medium mb-1">Review before filing</div>
-    <ul class="list-disc list-inside space-y-1">{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    <div class="font-medium mb-1">Filing readiness — review before treating as final</div>
+    <ul class="list-disc list-inside space-y-1">{% for f in flags %}<li>{{ f.message }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
 
