@@ -39,6 +39,7 @@ def build_snapshot(session: Session) -> dict:
     totals = {"holdings_btc": 0, "holdings_basis_usd": Decimal("0"),
               "realized_short_usd": Decimal("0"), "realized_long_usd": Decimal("0"),
               "income_usd": Decimal("0")}
+    holdings_by_kyc: dict[str, dict] = defaultdict(lambda: {"sats": 0, "basis_usd": Decimal("0")})
     years: set[int] = set()
     missing_price = 0
 
@@ -58,19 +59,28 @@ def build_snapshot(session: Session) -> dict:
                     "account": acct.name, "date": d.date.strftime("%Y-%m-%d"), "kind": d.kind,
                     "btc": _btc(d.sats), "term": d.term, "proceeds_usd": _money(d.proceeds_usd),
                     "basis_usd": _money(d.basis_usd), "gain_usd": _money(d.gain_usd),
-                    "acquired": d.acquired.strftime("%Y-%m-%d"),
+                    "acquired": d.acquired.strftime("%Y-%m-%d"), "kyc_origin": d.kyc_origin or "unknown",
                 })
+
+        acct_kyc = cb.holding_by_kyc
+        for label, h in acct_kyc.items():
+            holdings_by_kyc[label]["sats"] += h["sats"]
+            holdings_by_kyc[label]["basis_usd"] += h["basis_usd"]
 
         acct_blocks.append({
             "name": acct.name,
             "owner": acct.owner or "(you)",
             "label": acct.label_kind or "",
             "lot_method": acct.lot_method.upper(),
+            "disposal_priority": acct.disposal_priority,
             "holdings_btc": _btc(cb.holding_sats),
             "holdings_basis_usd": _money(cb.holding_basis_usd),
             "realized_short_usd": _money(cb.realized_short_usd),
             "realized_long_usd": _money(cb.realized_long_usd),
             "income_usd": _money(cb.income_usd),
+            "holdings_by_kyc_origin": {(k or "unknown"): {"btc": _btc(v["sats"]),
+                                                          "basis_usd": _money(v["basis_usd"])}
+                                       for k, v in acct_kyc.items()},
             "by_year": {str(y): {"short_usd": _money(v["short_usd"]), "long_usd": _money(v["long_usd"]),
                                  "proceeds_usd": _money(v["proceeds_usd"]), "disposals": v["count"]}
                         for y, v in sorted(by_year.items())},
@@ -99,6 +109,9 @@ def build_snapshot(session: Session) -> dict:
             "realized_short_usd": _money(totals["realized_short_usd"]),
             "realized_long_usd": _money(totals["realized_long_usd"]),
             "income_usd": _money(totals["income_usd"]),
+            "holdings_by_kyc_origin": {(k or "unknown"): {"btc": _btc(v["sats"]),
+                                                          "basis_usd": _money(v["basis_usd"])}
+                                       for k, v in holdings_by_kyc.items()},
         },
         "years_with_disposals": sorted(years),
         "disposals": disposals_out,

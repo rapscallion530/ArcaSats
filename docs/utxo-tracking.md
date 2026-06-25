@@ -50,9 +50,34 @@ spent status + label, never duplicates). Called from `import_xpub`.
 the unspent UTXO inventory plus the privacy panel. Outpoints/txids link to your configured
 block explorer when set.
 
+## KYC provenance through the cost-basis engine (Layer A + B — BUILT)
+
+KYC-ness is an **acquisition** property, so it lives on the lot, not the UTXO (this also covers
+custodial omnibus sources with no output-level visibility). See `app/services/costbasis.py`:
+
+- **Layer A — KYC on the lot.** The acquiring account's `label_kind` is snapshotted onto each
+  buy/income/opening (`Transaction.kyc_origin`, mirroring `Utxo.label_kind`). A self-transfer
+  carries provenance by storing the consumed **source-lot fragments** as JSON on the destination
+  `transfer_in` (`Transaction.carried_lots`); `compute()` rebuilds the destination lots from
+  those fragments, preserving each one's **original acquisition date** (holding period tacks,
+  IRC §1223) and its own KYC label. `CostBasisResult.holding_by_kyc` / `realized_by_kyc` (and the
+  8949 / assistant snapshot) report holdings + gains by class.
+- **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
+  (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
+  account's FIFO/LIFO/HIFO ordering applies. Specific identification **by class**, no UTXO link
+  required; the gain math is unchanged.
+
+## Phase 3 (deferred) — UTXO-outpoint specific identification
+
+Disposing of *literal* chosen coins (not just a KYC class) is the only part that genuinely needs
+UTXO granularity: a lot↔UTXO link (only on-chain receives have UTXOs; custodial lots are omnibus
+with none) plus a per-disposal coin-picker UI. When that lands, a UTXO derived from **mixed
+inputs** (a consolidation co-spending KYC + non-KYC coins into one output) is labeled **KYC** —
+the conservative choice (`costbasis._merge_kyc`): once commingled, the surveillance taint already
+spreads, so labeling the result KYC reflects the true exposure rather than overstating "clean"
+holdings.
+
 ## Not in scope (would be a different project)
 
 Anything pointed *outward* — clustering strangers, entity attribution, fund-flow tracing, risk
-scoring — is deliberately excluded; see the scope discussion in the project notes. A future
-Phase 3 (UTXO-anchored cost basis / specific-ID disposal selection) would touch the tax engine
-and is tracked separately.
+scoring — is deliberately excluded; see the scope discussion in the project notes.

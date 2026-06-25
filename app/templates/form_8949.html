@@ -77,6 +77,33 @@
     </div>
   </section>
 
+  {% if by_kyc and (by_kyc|length > 1 or "" not in by_kyc) %}
+  <section>
+    <h2 class="text-lg text-heading mb-2">Realized gain by KYC origin{% if year %} — {{ year }}{% endif %}</h2>
+    <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium">Origin</th>
+          <th class="px-4 py-3 font-medium text-right">Short-term</th>
+          <th class="px-4 py-3 font-medium text-right">Long-term</th>
+          <th class="px-4 py-3 font-medium text-right">Total</th>
+        </tr></thead>
+        <tbody>
+          {% for origin, g in by_kyc.items() %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-4 py-3">{{ origin or "Unknown" }}</td>
+            <td class="px-4 py-3 text-right tabular-nums {{ 'text-gain' if g.short >= 0 else 'text-loss' }}">{{ g.short|susd }}</td>
+            <td class="px-4 py-3 text-right tabular-nums {{ 'text-gain' if g.long >= 0 else 'text-loss' }}">{{ g.long|susd }}</td>
+            <td class="px-4 py-3 text-right tabular-nums {{ 'text-gain' if g.total >= 0 else 'text-loss' }}">{{ g.total|susd }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-muted mt-1">Draft breakdown — coins commingled on-chain may carry a more conservative label than shown.</p>
+  </section>
+  {% endif %}
+
   {% if flags %}
   <div class="rounded-card border border-warn/50 bg-warn/10 px-4 py-3 text-sm text-warn">
     <div class="font-medium mb-1">Filing readiness — review before treating as final</div>

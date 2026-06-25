@@ -79,6 +79,7 @@ async def create_account(
     label_kind: str = Form(""),
     owner: str = Form(""),
     note: str = Form(""),
+    disposal_priority: str = Form("none"),
     session: Session = Depends(get_session),
 ):
     name = name.strip()
@@ -86,7 +87,7 @@ async def create_account(
         existing = {a.name for a in accounts_svc.list_accounts(session)}
         if name not in existing:
             accounts_svc.create_account(session, name=name, label_kind=label_kind, note=note,
-                                        owner=owner)
+                                        owner=owner, disposal_priority=disposal_priority)
     # Return the refreshed accounts grid (HTMX swaps it in).
     return templates.TemplateResponse(
         request, "partials/accounts_grid.html",
@@ -166,10 +167,12 @@ async def edit_form(account_id: int, request: Request, session: Session = Depend
 @router.post("/accounts/{account_id}/edit", response_class=HTMLResponse)
 async def edit_account(account_id: int, request: Request, name: str = Form(...),
                        label_kind: str = Form(""), owner: str = Form(""), note: str = Form(""),
-                       lot_method: str = Form(""), session: Session = Depends(get_session)):
+                       lot_method: str = Form(""), disposal_priority: str = Form(""),
+                       session: Session = Depends(get_session)):
     if _account(session, account_id, request) is None:
         return _DENIED_PARTIAL
-    account, error = accounts_svc.update_account(session, account_id, name, label_kind, note, owner, lot_method)
+    account, error = accounts_svc.update_account(session, account_id, name, label_kind, note, owner,
+                                                 lot_method, disposal_priority)
     if error:
         return templates.TemplateResponse(request, "partials/account_edit_form.html",
                                           {"account": account, "error": error})
@@ -470,6 +473,7 @@ async def carry_toggle(account_id: int, tx_id: int, request: Request, session: S
         tx.carry_disabled = not tx.carry_disabled
         if tx.carry_disabled:
             tx.carried_basis_usd = None  # opt out -> fresh basis
+            tx.carried_lots = None       # and drop the carried lot fragments
         session.commit()
         if not tx.carry_disabled:
             costbasis.reconcile_internal_transfers(session)  # opt back in -> re-apply carry

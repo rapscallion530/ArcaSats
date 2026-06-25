@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import SATS_PER_BTC, Transaction, TxKind
+from app.models import SATS_PER_BTC, Account, Transaction, TxKind
+
+# Direct (external) acquisitions whose KYC provenance is the acquiring account's label. A
+# TRANSFER_IN is excluded: its coins came from elsewhere, so its label is the SOURCE's, carried
+# in by the reconciler (costbasis.carried_lots), not the destination account's.
+_KYC_SNAPSHOT_KINDS = (TxKind.BUY, TxKind.INCOME, TxKind.OPENING)
 
 
 def btc_to_sats(value: str | Decimal | float) -> int:
@@ -63,14 +68,24 @@ def add_transaction(
     source: str = "manual",
     external_id: str | None = None,
     note: str = "",
+    kyc_origin: str = "",
 ) -> Transaction | None:
     """Insert a transaction. Returns None if it's a duplicate (source+external_id).
 
     fiat_source records where the USD value came from ("actual"/"manual"); it only sticks
     when a fiat_value is actually present, so the price backfill can fill missing ones.
+
+    kyc_origin snapshots the acquiring account's KYC label onto a direct acquisition
+    (buy/income/opening) so the cost-basis engine can report holdings/gains by KYC class. It's
+    derived centrally from the account here (so importers/routes need not pass it); an explicit
+    value wins. Mirrors how Utxo.label_kind is snapshotted at sync.
     """
     if kind not in TxKind.ALL:
         raise ValueError(f"unknown kind: {kind}")
+
+    if not kyc_origin and kind in _KYC_SNAPSHOT_KINDS:
+        acct = session.get(Account, account_id)  # identity-cached within an import
+        kyc_origin = acct.label_kind if acct else ""
 
     # Derive fiat_value from price if only price given (and vice versa).
     if fiat_value is None and price_usd is not None and amount_sats:
@@ -85,6 +100,7 @@ def add_transaction(
         fiat_source=(fiat_source if fiat_value is not None else None),
         txid=txid, address=address,
         counterparty=counterparty, source=source, external_id=external_id, note=note,
+        kyc_origin=kyc_origin,
     )
     session.add(tx)
     try:

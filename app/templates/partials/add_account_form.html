@@ -23,6 +23,14 @@
       <input name="owner" type="text" placeholder="blank = you; or a family member"
              class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
     </label>
+    <label class="text-sm">
+      <span class="text-muted">KYC disposal priority</span>
+      <select name="disposal_priority" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        <option value="none" selected>None (use cost-basis method)</option>
+        <option value="non_kyc_first">Spend non-KYC first</option>
+        <option value="kyc_first">Spend KYC first</option>
+      </select>
+    </label>
     <label class="text-sm sm:col-span-2">
       <span class="text-muted">Note (optional)</span>
       <input name="note" type="text"

@@ -53,6 +53,7 @@ async def form_8949(account_id: int, request: Request, year: int | None = None,
     return templates.TemplateResponse(
         request, "form_8949.html",
         {"account": account, "rows": rows, "totals": taxforms.totals(rows),
+         "by_kyc": taxforms.totals_by_kyc(rows),
          "year": year, "years": years,
          "income": taxforms.income_for_year(txs, year) if year else None,
          "flags": flags},

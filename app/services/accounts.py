@@ -32,10 +32,14 @@ class AccountSummary:
     balance_sats: int
 
 
+_DISPOSAL_PRIORITIES = ("none", "non_kyc_first", "kyc_first")
+
+
 def create_account(session: Session, name: str, label_kind: str = "", note: str = "",
-                   owner: str = "") -> Account:
+                   owner: str = "", disposal_priority: str = "none") -> Account:
     acct = Account(name=name.strip(), label_kind=label_kind.strip(), note=note.strip(),
-                   owner=owner.strip())
+                   owner=owner.strip(),
+                   disposal_priority=disposal_priority if disposal_priority in _DISPOSAL_PRIORITIES else "none")
     session.add(acct)
     session.commit()
     session.refresh(acct)
@@ -58,9 +62,13 @@ def get_tx(session: Session, account_id: int, tx_id: int) -> Transaction | None:
 
 
 def update_account(session: Session, account_id: int, name: str, label_kind: str = "",
-                   note: str = "", owner: str = "", lot_method: str = "") -> tuple[Account | None, str]:
-    """Edit an account's name, label, owner, and note. Returns (account, error).
-    Name must be non-empty and unique."""
+                   note: str = "", owner: str = "", lot_method: str = "",
+                   disposal_priority: str = "") -> tuple[Account | None, str]:
+    """Edit an account's name, label, owner, note, lot method, and KYC disposal priority.
+    Returns (account, error). Name must be non-empty and unique. Changing the KYC label
+    re-snapshots kyc_origin onto this account's existing direct acquisitions (buy/income/
+    opening) so reporting reflects the new label; downstream carried labels refresh on the next
+    reconcile/Sync."""
     from sqlalchemy.exc import IntegrityError
     acct = session.get(Account, account_id)
     if acct is None:
@@ -68,12 +76,23 @@ def update_account(session: Session, account_id: int, name: str, label_kind: str
     name = name.strip()
     if not name:
         return acct, "Name cannot be empty."
+    new_label = label_kind.strip()
+    label_changed = new_label != acct.label_kind
     acct.name = name
-    acct.label_kind = label_kind.strip()
+    acct.label_kind = new_label
     acct.owner = owner.strip()
     if lot_method in ("fifo", "lifo", "hifo"):
         acct.lot_method = lot_method
+    if disposal_priority in _DISPOSAL_PRIORITIES:
+        acct.disposal_priority = disposal_priority
     acct.note = note.strip()
+    if label_changed:
+        direct = (TxKind.BUY, TxKind.INCOME, TxKind.OPENING)
+        for tx in session.scalars(
+            select(Transaction).where(Transaction.account_id == account_id,
+                                      Transaction.kind.in_(direct))
+        ):
+            tx.kyc_origin = new_label
     try:
         session.commit()
     except IntegrityError:

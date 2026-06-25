@@ -5,6 +5,31 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — KYC/UTXO lot engine (audit #8)
+
+KYC provenance through the cost-basis engine — Layer A in full, plus the start of Layer B.
+See [`docs/utxo-tracking.md`](docs/utxo-tracking.md) and [`project notes`]. Local-only; no
+egress behavior change. (Migration `0003_kyc_origin`; 156 tests.)
+
+### Features
+- **Layer A — KYC on the lot.** `Transaction.kyc_origin` snapshots the acquiring account's
+  `label_kind` onto each buy/income/opening at import (mirrors `Utxo.label_kind`); relabeling an
+  account re-snapshots its existing direct acquisitions. `Lot`/`Disposal` carry the label and
+  `CostBasisResult.holding_by_kyc` / `realized_by_kyc` report holdings + gains by class — surfaced
+  on the cost-basis tile, the 8949 (`taxforms.totals_by_kyc`), and the assistant snapshot.
+- **[P0] Fragment-rebuild basis carry.** A reconciled self-transfer now stores the consumed
+  **source-lot fragments** (`Transaction.carried_lots`, JSON) so `compute()` rebuilds the
+  destination lots preserving each fragment's **original acquisition date** and KYC label. This
+  also fixes a latent bug where a self-transfer collapsed to one lot dated at the transfer,
+  **resetting the holding-period clock** (a >1yr-held coin could be misreported short-term after
+  moving wallets). Holding period now tacks across transfers (IRC §1223).
+- **Layer B (start) — dispose by KYC status.** `Account.disposal_priority`
+  (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
+  account's FIFO/LIFO/HIFO ordering still applies. Specific-ID **by class**; gain math unchanged.
+  Default `none` keeps selection byte-identical, including the HIFO max-heap fast path.
+- Deferred: UTXO-outpoint specific-ID (pick literal coins) — needs a lot↔UTXO link + a picker
+  UI; designed in `docs/utxo-tracking.md` Phase 3 (incl. the conservative mixed→KYC rule).
+
 ## 0.1.0 — 2026-06 (pre-release hardening)
 
 Three independent audit passes before the public alpha. Findings fixed, grouped by area.

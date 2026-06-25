@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import heapq
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -27,6 +28,28 @@ from app.services import transactions as tx_svc
 
 def _norm_owner(owner: str | None) -> str:
     return (owner or "").strip().lower()
+
+
+DISPOSAL_PRIORITIES = ("none", "non_kyc_first", "kyc_first")
+
+
+def _is_kyc(label: str | None) -> bool:
+    """A coin is KYC iff its provenance label normalizes to "kyc". Everything else — an explicit
+    "non-KYC", a custom label, or blank/unknown — groups as non-KYC for disposal-priority
+    purposes (the conservative choice for the privacy use case: spend non-KYC/unknown first)."""
+    return (label or "").strip().lower() == "kyc"
+
+
+def _merge_kyc(labels) -> str:
+    """Collapse several provenance labels into ONE, conservatively: if the inputs span more than
+    one distinct non-empty label, the result is "KYC" (a coin commingled from KYC + non-KYC
+    inputs is treated as KYC — see docs/utxo-tracking.md). One label ⇒ itself; none ⇒ "".
+    Used where coins MUST carry a single label (a future UTXO-consolidation output); the
+    fragment-rebuild carry keeps fragments separate, so it isn't needed on the normal path."""
+    distinct = {(l or "").strip() for l in labels if (l or "").strip()}
+    if len(distinct) > 1:
+        return "KYC"
+    return next(iter(distinct)) if distinct else ""
 
 
 def tx_key(tx: Transaction) -> str | None:
@@ -59,6 +82,19 @@ def internal_txids(session: Session) -> set[str]:
 _CENTS = Decimal("0.01")
 
 
+def _fragments_json(frags: list[dict] | None) -> str | None:
+    """Serialize a transfer_out's consumed-lot fragments (from transfer_out_lots) into the JSON
+    stored on the destination transfer_in's `carried_lots`, so compute() can rebuild the lots.
+    datetimes → ISO, Decimals → str. None/empty ⇒ None (fall back to the single carried lot)."""
+    if not frags:
+        return None
+    return json.dumps([
+        {"acquired": f["acquired"].isoformat(), "sats": int(f["sats"]),
+         "basis": str(f["basis"]), "kyc": f.get("kyc", "")}
+        for f in frags
+    ])
+
+
 def _is_long_term(acquired: dt.datetime, disposed: dt.datetime) -> bool:
     """IRS long-term = held MORE THAN one year. Holding period is measured in CALENDAR DATES,
     not clock time: a sale at any time on the one-year anniversary is still short-term; it must
@@ -78,6 +114,7 @@ class Lot:
     sats: int
     basis_usd: Decimal  # basis attributable to the remaining sats
     source: str = ""
+    kyc_origin: str = ""  # provenance label ("KYC"/"non-KYC"/…); "" = unknown
 
 
 @dataclass
@@ -89,6 +126,7 @@ class Disposal:
     basis_usd: Decimal
     acquired: dt.datetime
     term: str  # "short" | "long"
+    kyc_origin: str = ""  # provenance of the lot this fragment consumed
 
     @property
     def gain_usd(self) -> Decimal:
@@ -140,6 +178,34 @@ class CostBasisResult:
     def proceeds_total_usd(self) -> Decimal:
         return sum((d.proceeds_usd for d in self.disposals), Decimal("0")).quantize(_CENTS)
 
+    @property
+    def holding_by_kyc(self) -> dict[str, dict]:
+        """Open-lot holdings bucketed by provenance label: {label: {"sats", "basis_usd"}}.
+        Key "" means unknown (e.g. an unreconciled transfer in). Buckets are the raw labels, so
+        they break down naturally with no forced merge (fragment-rebuild keeps lots separate)."""
+        out: dict[str, dict] = {}
+        for lot in self.open_lots:
+            b = out.setdefault(lot.kyc_origin or "", {"sats": 0, "basis_usd": Decimal("0")})
+            b["sats"] += lot.sats
+            b["basis_usd"] += lot.basis_usd
+        for b in out.values():
+            b["basis_usd"] = b["basis_usd"].quantize(_CENTS)
+        return out
+
+    @property
+    def realized_by_kyc(self) -> dict[str, dict]:
+        """Realized gain bucketed by the consumed lot's provenance: {label: {short, long, total}}."""
+        out: dict[str, dict] = {}
+        for d in self.disposals:
+            b = out.setdefault(d.kyc_origin or "",
+                               {"short": Decimal("0"), "long": Decimal("0"), "total": Decimal("0")})
+            b[d.term] += d.gain_usd
+            b["total"] += d.gain_usd
+        for b in out.values():
+            for k in b:
+                b[k] = b[k].quantize(_CENTS)
+        return out
+
 
 def _acq_basis(tx: Transaction) -> Decimal:
     fee = tx.fiat_fee or Decimal("0")
@@ -165,22 +231,83 @@ def _acq_basis(tx: Transaction) -> Decimal:
 LOT_METHODS = ("fifo", "lifo", "hifo")
 
 
-def _select_index(lots: list[Lot], method: str) -> int:
-    """Index of the lot to consume next for the chosen method."""
+def _method_index(lots: list[Lot], candidates: list[int], method: str) -> int:
+    """Pick the next lot from `candidates` (indices into `lots`) by the within-class ordering."""
     if method == "lifo":
-        return len(lots) - 1
+        return candidates[-1]
     if method == "hifo":  # highest cost basis per sat first (minimizes gain)
-        best_rate, best_i = None, 0
-        for i, lot in enumerate(lots):
+        best_rate, best_i = None, candidates[0]
+        for i in candidates:
+            lot = lots[i]
             rate = (lot.basis_usd / lot.sats) if lot.sats else Decimal("0")
             if best_rate is None or rate > best_rate:
                 best_rate, best_i = rate, i
         return best_i
-    return 0  # fifo — lots are kept in acquisition order
+    return candidates[0]  # fifo — lots are kept in acquisition (append) order
+
+
+def _select_index(lots: list[Lot], method: str, priority: str = "none") -> int:
+    """Index of the lot to consume next. With a KYC `priority`, the preferred class is exhausted
+    first (specific-ID by class); within the chosen pool, ordering follows `method`."""
+    if priority in ("non_kyc_first", "kyc_first"):
+        prefer_kyc = priority == "kyc_first"
+        pref = [i for i, lot in enumerate(lots) if _is_kyc(lot.kyc_origin) == prefer_kyc]
+        candidates = pref if pref else list(range(len(lots)))
+    else:
+        candidates = list(range(len(lots)))
+    return _method_index(lots, candidates, method)
+
+
+def _carried_fragment_lots(tx: Transaction) -> list[Lot] | None:
+    """Rebuild a transfer_in's destination lots from the source fragments the reconciler stored
+    in `carried_lots`. Each fragment keeps its ORIGINAL acquisition date (so the holding period
+    tacks across a self-transfer, IRC §1223) and its own KYC label. Returns None when there are
+    no usable fragments (caller falls back to the single carried_basis_usd lot) or the user opted
+    this transfer out of carryover."""
+    if tx.kind != TxKind.TRANSFER_IN or tx.carry_disabled or not tx.carried_lots:
+        return None
+    try:
+        frags = json.loads(tx.carried_lots)
+    except (ValueError, TypeError):
+        return None
+    parsed = []
+    for f in sorted(frags, key=lambda fr: fr.get("acquired", "")):
+        sats = int(f.get("sats", 0))
+        if sats <= 0:
+            continue
+        parsed.append((dt.datetime.fromisoformat(f["acquired"]), sats,
+                       Decimal(str(f.get("basis", "0"))), f.get("kyc", "") or ""))
+    if not parsed:
+        return None
+
+    # The fragments sum to the SOURCE outflow; the destination may have received slightly less
+    # (a network fee skimmed in transit on a heuristic amount+date match). Scale the sats to what
+    # was actually received while preserving each fragment's basis (the fee doesn't change basis),
+    # so holdings stay exact instead of overstated. Shared-txid matches have equal amounts → no
+    # scaling, byte-identical to the unscaled fragments.
+    frag_total = sum(p[1] for p in parsed)
+    target = tx.amount_sats
+    scale = target > 0 and frag_total > 0 and target != frag_total
+    out: list[Lot] = []
+    used = 0
+    pending_basis = Decimal("0")  # basis from any fragment that scaled to 0 sats — never dropped
+    for i, (acquired, sats, basis, kyc) in enumerate(parsed):
+        n_sats = sats if not scale else (target - used if i == len(parsed) - 1 else sats * target // frag_total)
+        if n_sats <= 0:
+            pending_basis += basis
+            continue
+        out.append(Lot(acquired=acquired, sats=int(n_sats), basis_usd=basis + pending_basis,
+                       source=tx.source, kyc_origin=kyc))
+        pending_basis = Decimal("0")
+        used += int(n_sats)
+    if pending_basis and out:  # trailing fragment(s) scaled out — fold their basis into the last lot
+        out[-1].basis_usd += pending_basis
+    return out or None
 
 
 def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
-            method: str = "fifo", account_internal_within: set[str] | None = None) -> CostBasisResult:
+            method: str = "fifo", account_internal_within: set[str] | None = None,
+            priority: str = "none") -> CostBasisResult:
     """Run the lot engine over `txs`.
 
     `account_internal_within` is the set of txids that are internal moves between wallets of
@@ -189,11 +316,19 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
     side of an intra-account move, so deriving it from `txs` here would miss it and the
     per-wallet basis would double-count. Callers computing a whole account can leave it None
     (we derive it from `txs`, which then contains both sides).
+
+    `priority` is the account's KYC disposal preference (none/non_kyc_first/kyc_first). With the
+    default "none" the engine is byte-identical to before, including the HIFO max-heap fast path;
+    a KYC priority falls back to a linear class-aware selection (opt-in).
     """
     res = CostBasisResult()
     lots: list[Lot] = []
     hifo_heap: list[tuple[Decimal, int, Lot]] = []
     method = method if method in LOT_METHODS else "fifo"
+    priority = priority if priority in DISPOSAL_PRIORITIES else "none"
+    # The HIFO heap is an ordering optimization; a KYC priority reorders selection, so use it
+    # only on the default path. (Selection then goes through the linear _select_index.)
+    use_heap = method == "hifo" and priority == "none"
     internal = internal_txids or set()
     if account_internal_within is not None:
         internal_within = account_internal_within
@@ -209,6 +344,17 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             continue  # internal move within this account — no basis change
 
         if tx.kind in TxKind.ACQUISITIONS:
+            # A reconciled transfer_in rebuilds MULTIPLE lots from the source fragments, keeping
+            # each one's original acquisition date (holding period tacks) and its own KYC label.
+            frag_lots = _carried_fragment_lots(tx)
+            if frag_lots is not None:
+                for lot in frag_lots:
+                    lots.append(lot)
+                    if use_heap:
+                        rate = (lot.basis_usd / lot.sats) if lot.sats else Decimal("0")
+                        heapq.heappush(hifo_heap, (-rate, len(lots), lot))
+                continue
+
             basis = _acq_basis(tx)
             if tx.kind == TxKind.INCOME:
                 res.income_usd += basis
@@ -224,9 +370,10 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
                         f"acquisition cost so gains compute correctly."
                     )
             if tx.amount_sats > 0:
-                lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis, source=tx.source)
+                lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis,
+                          source=tx.source, kyc_origin=tx.kyc_origin or "")
                 lots.append(lot)
-                if method == "hifo":
+                if use_heap:
                     rate = (basis / tx.amount_sats) if tx.amount_sats else Decimal("0")
                     heapq.heappush(hifo_heap, (-rate, len(lots), lot))
 
@@ -234,10 +381,12 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             proceeds = (tx.fiat_value or Decimal("0"))
             if tx.kind == TxKind.SELL and tx.fiat_fee:
                 proceeds -= tx.fiat_fee
-            _dispose(lots, tx, proceeds, res, realize=True, method=method, hifo_heap=hifo_heap)
+            _dispose(lots, tx, proceeds, res, realize=True, method=method,
+                     hifo_heap=hifo_heap if use_heap else None, priority=priority)
 
         elif tx.kind == TxKind.TRANSFER_OUT:
-            _dispose(lots, tx, Decimal("0"), res, realize=False, method=method, hifo_heap=hifo_heap)
+            _dispose(lots, tx, Decimal("0"), res, realize=False, method=method,
+                     hifo_heap=hifo_heap if use_heap else None, priority=priority)
         # FEE: ignored for basis
 
     res.open_lots = [lot for lot in lots if lot.sats > 0]
@@ -246,20 +395,21 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
 
 def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasisResult,
              realize: bool, method: str = "fifo",
-             hifo_heap: list[tuple[Decimal, int, Lot]] | None = None) -> None:
+             hifo_heap: list[tuple[Decimal, int, Lot]] | None = None,
+             priority: str = "none") -> None:
     need = tx.amount_sats
     total = need
     consumed_basis = Decimal("0")
     while need > 0 and lots:
         idx = None
-        if method == "hifo" and hifo_heap is not None:
+        if hifo_heap is not None:  # default HIFO fast path (priority == "none"; see compute)
             while hifo_heap and hifo_heap[0][2].sats <= 0:
                 heapq.heappop(hifo_heap)
             if not hifo_heap:
                 break
             lot = hifo_heap[0][2]
         else:
-            idx = _select_index(lots, method)
+            idx = _select_index(lots, method, priority)
             lot = lots[idx]
         take = min(lot.sats, need)
         basis_portion = (lot.basis_usd * Decimal(take) / Decimal(lot.sats)) if lot.sats else Decimal("0")
@@ -267,7 +417,8 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
         _k = tx_key(tx)
         if not realize and _k:
             res.transfer_out_lots.setdefault(_k, []).append(
-                {"acquired": lot.acquired, "sats": take, "basis": basis_portion.quantize(_CENTS)}
+                {"acquired": lot.acquired, "sats": take, "basis": basis_portion.quantize(_CENTS),
+                 "kyc": lot.kyc_origin}
             )
         if realize:
             proceeds_portion = (proceeds * Decimal(take) / Decimal(total)) if total else Decimal("0")
@@ -275,13 +426,13 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
             res.disposals.append(Disposal(
                 date=tx.timestamp, kind=tx.kind, sats=take,
                 proceeds_usd=proceeds_portion.quantize(_CENTS), basis_usd=basis_portion.quantize(_CENTS),
-                acquired=lot.acquired, term=term,
+                acquired=lot.acquired, term=term, kyc_origin=lot.kyc_origin,
             ))
         lot.sats -= take
         lot.basis_usd -= basis_portion
         need -= take
         if lot.sats <= 0:
-            if method == "hifo" and hifo_heap is not None:
+            if hifo_heap is not None:
                 heapq.heappop(hifo_heap)
             elif idx is not None:
                 del lots[idx]
@@ -318,6 +469,12 @@ def _account_method(session: Session, account_id: int) -> str:
     return acct.lot_method if acct and acct.lot_method in LOT_METHODS else "fifo"
 
 
+def _account_priority(session: Session, account_id: int) -> str:
+    acct = session.get(Account, account_id)
+    pr = getattr(acct, "disposal_priority", "none")
+    return pr if pr in DISPOSAL_PRIORITIES else "none"
+
+
 def _account_internal_within(txs: list[Transaction], internal: set[str]) -> set[str]:
     """Txids that move coins between two wallets OF THIS ACCOUNT (both sides present)."""
     here_out = {t.txid for t in txs if t.kind == TxKind.TRANSFER_OUT and t.txid}
@@ -327,7 +484,8 @@ def _account_internal_within(txs: list[Transaction], internal: set[str]) -> set[
 
 def compute_account(session: Session, account_id: int) -> CostBasisResult:
     return compute(tx_svc.list_transactions(session, account_id), internal_txids(session),
-                   method=_account_method(session, account_id))
+                   method=_account_method(session, account_id),
+                   priority=_account_priority(session, account_id))
 
 
 def compute_wallet(session: Session, account_id: int, wallet_id: int | None) -> CostBasisResult:
@@ -340,7 +498,8 @@ def compute_wallet(session: Session, account_id: int, wallet_id: int | None) -> 
     account_internal = _account_internal_within(all_txs, internal)
     wtxs = [t for t in all_txs if t.wallet_id == wallet_id]
     return compute(wtxs, internal, method=_account_method(session, account_id),
-                   account_internal_within=account_internal)
+                   account_internal_within=account_internal,
+                   priority=_account_priority(session, account_id))
 
 
 def compute_account_breakdown(
@@ -352,13 +511,15 @@ def compute_account_breakdown(
     txs = tx_svc.list_transactions(session, account_id)
     internal = internal_txids(session)
     method = _account_method(session, account_id)
+    priority = _account_priority(session, account_id)
     account_internal = _account_internal_within(txs, internal)
 
-    account_res = compute(txs, internal, method=method, account_internal_within=account_internal)
+    account_res = compute(txs, internal, method=method, account_internal_within=account_internal,
+                          priority=priority)
     wallet_ids = sorted({t.wallet_id for t in txs}, key=lambda w: (w is None, w or 0))
     per_wallet = [
         (wid, compute([t for t in txs if t.wallet_id == wid], internal, method=method,
-                      account_internal_within=account_internal))
+                      account_internal_within=account_internal, priority=priority))
         for wid in wallet_ids
     ]
     return account_res, per_wallet
@@ -563,9 +724,12 @@ def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int) -> tuple[b
     i.carry_disabled = False
     o.transfer_reviewed = i.transfer_reviewed = True
     session.commit()
-    # With the source row now a transfer_out, compute records the basis it consumed; carry it.
-    consumed = compute_account(session, o.account_id).transfer_out_basis.get(tx_key(o), Decimal("0"))
-    i.carried_basis_usd = consumed
+    # With the source row now a transfer_out, compute records the basis + lot fragments it
+    # consumed; carry both (fragments preserve original acquisition dates + KYC labels).
+    src = compute_account(session, o.account_id)
+    key = tx_key(o)
+    i.carried_basis_usd = src.transfer_out_basis.get(key, Decimal("0"))
+    i.carried_lots = _fragments_json(src.transfer_out_lots.get(key, []))
     session.commit()
     return True, ""
 
@@ -597,9 +761,13 @@ def reconcile_internal_transfers(session: Session, include_heuristic: bool = Fal
             continue
         if out_tx.account_id not in src_cache:
             src_cache[out_tx.account_id] = compute_account(session, out_tx.account_id)
-        consumed = src_cache[out_tx.account_id].transfer_out_basis.get(tx_key(out_tx), Decimal("0"))
-        if in_tx.carried_basis_usd != consumed:
+        src = src_cache[out_tx.account_id]
+        key = tx_key(out_tx)
+        consumed = src.transfer_out_basis.get(key, Decimal("0"))
+        frags_json = _fragments_json(src.transfer_out_lots.get(key, []))
+        if in_tx.carried_basis_usd != consumed or in_tx.carried_lots != frags_json:
             in_tx.carried_basis_usd = consumed
+            in_tx.carried_lots = frags_json
             updated += 1
     if updated:
         session.commit()  # single commit instead of one per updated row

@@ -71,6 +71,11 @@ class Account(Base):
     # and they establish a fresh basis.
     owner: Mapped[str] = mapped_column(String(120), default="")
     lot_method: Mapped[str] = mapped_column(String(10), default="fifo")  # fifo / lifo / hifo
+    # KYC-aware disposal selection (specific-ID BY CLASS, layered on lot_method's within-class
+    # ordering): "none" (pure lot_method), "non_kyc_first" or "kyc_first" consume the preferred
+    # KYC class before the rest. The gain math is unchanged — only which lot is chosen. See
+    # costbasis._select_index. (A "blank/unknown" label groups with non-KYC.)
+    disposal_priority: Mapped[str] = mapped_column(String(16), default="none")
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
@@ -145,6 +150,16 @@ class Transaction(Base):
     fiat_source: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # Cost basis carried in from a cross-account self-transfer (set by the reconciler).
     carried_basis_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    # Fragment payload (JSON) for a transfer_in: the SOURCE lots this transfer consumed, each
+    # {"acquired": ISO, "sats": int, "basis": decimal-str, "kyc": str}. Set by the reconciler so
+    # compute() rebuilds the destination lots preserving each fragment's ORIGINAL acquisition date
+    # (holding period tacks, IRC §1223) and its own KYC label. NULL ⇒ fall back to the single
+    # carried_basis_usd lot (legacy/manual). Kept consistent: carried_basis_usd = Σ fragment basis.
+    carried_lots: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance snapshot of the owning account's KYC label at acquisition time (e.g. "KYC" /
+    # "non-KYC"), mirroring Utxo.label_kind. Snapshotted onto buy/income/opening at import; a
+    # transfer_in's value is the SOURCE's, carried via carried_lots above (blank ⇒ unknown).
+    kyc_origin: Mapped[str] = mapped_column(String(40), default="")
     # If True, the user has opted this transfer_in OUT of basis carryover (use fresh basis).
     carry_disabled: Mapped[bool] = mapped_column(default=False)
     # True once the user has adjudicated this row in the reconciliation inbox (confirmed it as a

@@ -30,7 +30,7 @@ Comparing the Codex-generated requirements (2026-06-17) against what's built. Le
 14. UX — 🟡 dashboard/accounts/tax + node widget; ❌ first-run wizard, timeline, wallet map, UTXO explorer, reconciliation/missing-data inboxes.
 
 ## Built beyond the list
-Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, 140 tests.
+Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, KYC origin on cost-basis lots + KYC-aware disposal priority, 156 tests.
 
 ## Assessment of the spec
 - **Agree** with ~90%: privacy model, electrs/Tor, gift handling, FIFO default, reconciliation, 1099-DA caution, auditability, immutable pricing.
@@ -46,11 +46,21 @@ Single-user (optional app-wide password lock), in-app node settings (Sparrow-sty
 4. ✅ **Outbound Data Log** (host+purpose, local) + documented at-rest encryption stance.
    🟡 Live DB-at-rest encryption deferred (needs SQLCipher native lib; OS full-disk encryption recommended meanwhile).
 5. ✅ **Audit / "explain this gain/loss"** — open lots + per-disposal lot trace + needs-attention warnings.
-6. ❌ **UTXO-level lot engine — deliberately deferred.** Rationale: it's a major architectural rewrite
-   (per-UTXO lots, change-output basis allocation, merge/split graph, CoinJoin classification) that would
-   destabilize a working, 140-test app, for marginal benefit to a DCA/low-volume holder. Rev. Proc. 2024-28's
-   unit is the **wallet/account**, which we already track, and mainstream tools operate at this level too.
-   Revisit only if the user needs coin-control/CoinJoin-grade lot tracking. Current model: per-account FIFO/
-   LIFO/HIFO over net per-wallet movements, with documented transfers + basis carry.
+6. 🟡 **KYC/UTXO lot engine — Layer A + B(class) shipped; outpoint specific-ID deferred.**
+   - ✅ **Layer A — KYC on the lot:** the acquiring account's label is snapshotted onto each
+     acquisition (`Transaction.kyc_origin`), carried across self-transfers by rebuilding the
+     destination lots from the source fragments (preserving each fragment's original acquisition
+     date — so the holding period tacks, IRC §1223 — and its own KYC label). Holdings + realized
+     gains break down by KYC class (cost-basis tile, 8949, assistant snapshot).
+   - ✅ **Layer B (start) — dispose by KYC status:** `Account.disposal_priority`
+     (`non_kyc_first`/`kyc_first`) consumes the preferred KYC class first; within a class the
+     account's FIFO/LIFO/HIFO ordering still applies. Specific-ID **by class**; gain math
+     unchanged. Default `none` keeps the engine byte-identical (incl. the HIFO fast path).
+   - ❌ **Deferred — UTXO-outpoint specific-ID:** picking *literal* coins to dispose needs a
+     lot↔UTXO link (only on-chain receives have UTXOs; custodial lots are omnibus) + a
+     per-disposal coin-picker UI. See `docs/utxo-tracking.md` Phase 3 (incl. the conservative
+     mixed→KYC rule for a consolidation output). A major rewrite for marginal benefit to a
+     DCA/low-volume holder; Rev. Proc. 2024-28's unit is the wallet/account, which we track.
 
-Net: 5 of 6 priorities shipped; #6 is a scoped future epic, not a gap that blocks correct returns for this user.
+Net: all 6 priorities now shipped or substantially advanced; only the UTXO-outpoint level of #6
+remains a scoped future epic, not a gap that blocks correct returns for this user.

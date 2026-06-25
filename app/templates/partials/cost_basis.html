@@ -24,6 +24,31 @@
     </div>
   </div>
 
+  {% set kyc = cb.holding_by_kyc %}
+  {% if kyc and (kyc|length > 1 or "" not in kyc) %}
+  <div class="mt-6">
+    <h3 class="text-sm text-muted mb-2">Holdings by KYC origin</h3>
+    <div class="overflow-x-auto border border-line rounded-[8px]">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-muted border-b border-line">
+          <th class="px-3 py-2 font-medium">Origin</th>
+          <th class="px-3 py-2 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-3 py-2 font-medium text-right">Cost basis</th>
+        </tr></thead>
+        <tbody>
+          {% for origin, h in kyc.items() %}
+          <tr class="border-b border-line/60 last:border-0">
+            <td class="px-3 py-2">{{ origin or "Unknown" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ h.sats|btcamt }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ h.basis_usd|usd }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   {% if per_wallet and per_wallet|length > 1 %}
   <div class="mt-6">
     <h3 class="text-sm text-muted mb-2">Per wallet</h3>

@@ -25,6 +25,16 @@
         {% endfor %}
       </select>
     </label>
+    <label class="text-sm">
+      <span class="text-muted">KYC disposal priority</span>
+      <select name="disposal_priority" class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+        {% set _pr = account.disposal_priority or "none" %}
+        <option value="none" {% if _pr == "none" %}selected{% endif %}>None (use {{ account.lot_method|upper }})</option>
+        <option value="non_kyc_first" {% if _pr == "non_kyc_first" %}selected{% endif %}>Spend non-KYC first</option>
+        <option value="kyc_first" {% if _pr == "kyc_first" %}selected{% endif %}>Spend KYC first</option>
+      </select>
+      <span class="text-xs text-muted">Specific-ID by KYC class; within a class, {{ account.lot_method|upper }} still orders the lots.</span>
+    </label>
     <label class="text-sm sm:col-span-2">
       <span class="text-muted">Note (optional)</span>
       <input name="note" value="{{ account.note }}"

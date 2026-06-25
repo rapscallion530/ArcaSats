@@ -28,6 +28,7 @@ class Form8949Row:
     proceeds: Decimal
     basis: Decimal
     term: str
+    kyc_origin: str = ""
 
     @property
     def gain(self) -> Decimal:
@@ -46,10 +47,25 @@ def build_rows(result: CostBasisResult, year: int | None = None) -> list[Form894
         rows.append(Form8949Row(
             description=f"{_btc(d.sats)} BTC",
             acquired=d.acquired, sold=d.date,
-            proceeds=d.proceeds_usd, basis=d.basis_usd, term=d.term,
+            proceeds=d.proceeds_usd, basis=d.basis_usd, term=d.term, kyc_origin=d.kyc_origin,
         ))
     rows.sort(key=lambda r: (r.term, r.sold))
     return rows
+
+
+def totals_by_kyc(rows: list[Form8949Row]) -> dict[str, dict]:
+    """Realized short/long/total gain bucketed by the disposed lot's KYC origin, computed from
+    the (already year-filtered) 8949 rows so it stays consistent with the displayed totals."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        b = out.setdefault(r.kyc_origin or "",
+                           {"short": Decimal("0"), "long": Decimal("0"), "total": Decimal("0")})
+        b[r.term] += r.gain
+        b["total"] += r.gain
+    for b in out.values():
+        for k in b:
+            b[k] = b[k].quantize(_CENTS)
+    return out
 
 
 def totals(rows: list[Form8949Row]) -> dict:
