@@ -30,8 +30,7 @@ async def assistant_ask(request: Request, question: str = Form(""), conn_id: int
         result = llm.ChatResult(False, error="No local model is configured yet. Add one in "
                                 "Settings → Local AI.")
     else:
-        result = assistant_svc.ask(session, conn, question,
-                                   user_id=request.state.user_id, role=request.state.role)
+        result = assistant_svc.ask(session, conn, question)
     return templates.TemplateResponse(
         request, "partials/assistant_answer.html",
         {"result": result, "question": question, "conn": conn},

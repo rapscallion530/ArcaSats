@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 The ArcaSats Authors
-"""Authentication: password hashing + signed session tokens (stdlib only).
+"""Authentication: password hashing + an optional single app-wide lock (stdlib only).
 
-No native deps (bcrypt/argon2 need wheels). PBKDF2-HMAC-SHA256 for passwords,
-HMAC-signed cookie tokens. Secret key is read from BTT_SECRET_KEY or persisted to
-the data dir on first run.
+ArcaSats is single-user and local-only — there are no user accounts. When BTT_APP_PASSWORD is
+set, the whole app is gated behind that one password (useful if you expose the instance); when
+it's unset (the default), the app is open. An HMAC-signed cookie marks a session as unlocked.
+No native deps — PBKDF2-HMAC-SHA256 primitives are kept; the secret key is read from
+BTT_SECRET_KEY or persisted to the data dir on first run.
 """
 from __future__ import annotations
 
@@ -14,16 +16,11 @@ import os
 import time
 from functools import lru_cache
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 from app import config
-from app.models import User
 
 _ITER = 200_000
-# Session tokens are valid for 30 days (matches the cookie max-age). Server-side expiry means
-# a leaked cookie can't be replayed forever; token_version (signed in) allows revoking all of a
-# user's sessions (e.g. on password change) without rotating the global secret.
+# An unlock cookie is valid for 30 days (matches the cookie max-age); server-side expiry means
+# a leaked cookie can't be replayed forever.
 _TOKEN_MAX_AGE = 60 * 60 * 24 * 30
 
 
@@ -52,7 +49,7 @@ def get_secret_key() -> bytes:
         return path.read_bytes()
     key = os.urandom(32)
     path.write_bytes(key)
-    # This key forges any session — keep it owner-only (best effort; no-op on Windows ACLs).
+    # This key signs the unlock cookie — keep it owner-only (best effort; no-op on Windows ACLs).
     try:
         path.chmod(0o600)
     except OSError:
@@ -64,63 +61,37 @@ def _sig(payload: str) -> str:
     return hmac.new(get_secret_key(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-def sign_token(user_id: int, token_version: int = 0, issued_at: int | None = None) -> str:
-    """Signed cookie payload: `uid.issued_at.token_version.sig`. issued_at/token_version let
-    the server expire and revoke sessions; the signature covers all three fields."""
+# --- optional single app-wide password lock ----------------------------------
+def app_lock_enabled() -> bool:
+    """True when BTT_APP_PASSWORD is set, i.e. the app requires the password to enter."""
+    return bool(os.environ.get("BTT_APP_PASSWORD", ""))
+
+
+def check_app_password(pw: str) -> bool:
+    """Constant-time compare against the configured app password (False if none set)."""
+    expected = os.environ.get("BTT_APP_PASSWORD", "")
+    return bool(expected) and hmac.compare_digest(pw, expected)
+
+
+def sign_unlock(issued_at: int | None = None) -> str:
+    """Signed 'unlocked' cookie payload: `issued_at.sig`. No user identity — the app is
+    single-user; the cookie only attests that the password was entered."""
     issued = int(issued_at if issued_at is not None else time.time())
-    payload = f"{user_id}.{issued}.{token_version}"
-    return f"{payload}.{_sig(payload)}"
+    return f"{issued}.{_sig(str(issued))}"
 
 
-def decode_token(token: str | None, max_age: int = _TOKEN_MAX_AGE) -> tuple[int, int, int] | None:
-    """Validate signature + age. Returns (user_id, issued_at, token_version) or None.
-    The caller still checks token_version against the user's current value (revocation)."""
+def verify_unlock(token: str | None, max_age: int = _TOKEN_MAX_AGE) -> bool:
+    """True iff `token` is a validly-signed, unexpired unlock cookie."""
     if not token:
-        return None
+        return False
     parts = token.split(".")
-    if len(parts) != 4:
-        return None
-    uid_s, issued_s, ver_s, sig = parts
-    if not hmac.compare_digest(sig, _sig(f"{uid_s}.{issued_s}.{ver_s}")):
-        return None
+    if len(parts) != 2:
+        return False
+    issued_s, sig = parts
+    if not hmac.compare_digest(sig, _sig(issued_s)):
+        return False
     try:
-        uid, issued, ver = int(uid_s), int(issued_s), int(ver_s)
+        issued = int(issued_s)
     except ValueError:
-        return None
-    if int(time.time()) - issued > max_age:
-        return None  # expired
-    return uid, issued, ver
-
-
-def verify_token(token: str | None) -> int | None:
-    """User id from a valid (signed, unexpired) token, else None. Does not check
-    token_version — use decode_token + the user's current version for revocation."""
-    decoded = decode_token(token)
-    return decoded[0] if decoded else None
-
-
-# --- user ops ---
-def user_count(session: Session) -> int:
-    return int(session.scalar(select(func.count(User.id))) or 0)
-
-
-def create_user(session: Session, username: str, password: str, role: str = "member") -> User:
-    u = User(username=username.strip(), password_hash=hash_password(password), role=role)
-    session.add(u)
-    session.commit()
-    session.refresh(u)
-    return u
-
-
-def authenticate(session: Session, username: str, password: str) -> User | None:
-    u = session.scalar(select(User).where(User.username == username.strip()))
-    if u and verify_password(password, u.password_hash):
-        return u
-    return None
-
-
-def bump_token_version(session: Session, user: User) -> None:
-    """Invalidate all of a user's existing sessions (e.g. after a password change or a
-    "sign out everywhere"). Existing cookies carry the old version and will be rejected."""
-    user.token_version = (user.token_version or 0) + 1
-    session.commit()
+        return False
+    return int(time.time()) - issued <= max_age

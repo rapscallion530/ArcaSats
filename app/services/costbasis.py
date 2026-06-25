@@ -374,10 +374,9 @@ def find_transfer_matches(session: Session) -> list[tuple]:
     DIFFERENT accounts. kind is "txid" (shared on-chain id — reliable, auto-appliable) or
     "heuristic" (amount+date only — needs human review before mutating basis).
 
-    Owner identity is the tuple (owner_user_id, owner-label): a blank owner label on accounts
-    belonging to DIFFERENT app users must NOT compare as the same owner, or one user could
-    trigger basis changes on another's books. Matching never crosses owner_user_id."""
-    owner_of = {a.id: (a.owner_user_id, _norm_owner(a.owner))
+    Owner identity is the account's `owner` label (blank = you): a transfer to a DIFFERENT
+    owner is a gift, not a self-transfer, so basis must not carry across it."""
+    owner_of = {a.id: _norm_owner(a.owner)
                 for a in session.scalars(select(Account)).all()}
     rows = session.scalars(
         select(Transaction).where(Transaction.kind.in_((TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT)))
@@ -436,7 +435,7 @@ def reclassify_onchain_transfers(session: Session) -> int:
     Source-agnostic: it connects a Strike/Swan CSV disposal to the xpub wallet that received it,
     not just xpub-to-xpub. A move to a DIFFERENT owner is a gift (left as buy/sell). An outflow
     with no matching same-owner inflow stays a sell. Returns the number of rows relabeled."""
-    owner_of = {a.id: (a.owner_user_id, _norm_owner(a.owner)) for a in session.scalars(select(Account)).all()}
+    owner_of = {a.id: _norm_owner(a.owner) for a in session.scalars(select(Account)).all()}
     rows = session.scalars(select(Transaction).where(
         Transaction.txid.is_not(None),
         Transaction.kind.in_((TxKind.BUY, TxKind.SELL, TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT)),
@@ -494,30 +493,21 @@ class TransferSuggestion:
         return "low"
 
 
-def suggest_transfers(session: Session, user_id: int | None = None,
-                      role: str | None = None) -> list[TransferSuggestion]:
+def suggest_transfers(session: Session) -> list[TransferSuggestion]:
     """Propose same-owner outflow→inflow pairs that look like one self-transfer split across two
     transactions with different txids. High precision over recall: one best inflow per outflow,
     inside a tight amount+time window, excluding anything already proven (shared txid) or already
     adjudicated (transfer_reviewed) or already carrying basis. The user confirms or rejects each.
     """
     accts = {a.id: a for a in session.scalars(select(Account)).all()}
-
-    def visible(account_id: int) -> bool:
-        a = accts.get(account_id)
-        if a is None:
-            return False
-        return user_id is None or role == "admin" or a.owner_user_id == user_id
-
-    owner_of = {aid: (a.owner_user_id, _norm_owner(a.owner)) for aid, a in accts.items()}
+    owner_of = {aid: _norm_owner(a.owner) for aid, a in accts.items()}
     internal = internal_txids(session)
     rows = session.scalars(
         select(Transaction).where(Transaction.kind.in_(_OUTFLOW_SUGGEST + _INFLOW_SUGGEST))
     ).all()
 
     def eligible(t: Transaction) -> bool:
-        return (not t.transfer_reviewed and visible(t.account_id)
-                and not (t.txid and t.txid in internal))
+        return not t.transfer_reviewed and not (t.txid and t.txid in internal)
 
     outs = sorted([t for t in rows if t.kind in _OUTFLOW_SUGGEST and eligible(t)],
                   key=lambda t: (t.timestamp, t.id or 0))
@@ -556,18 +546,10 @@ def _same_owner(session: Session, a_id: int, b_id: int) -> bool:
     a, b = session.get(Account, a_id), session.get(Account, b_id)
     if a is None or b is None:
         return False
-    return (a.owner_user_id, _norm_owner(a.owner)) == (b.owner_user_id, _norm_owner(b.owner))
+    return _norm_owner(a.owner) == _norm_owner(b.owner)
 
 
-def _can_touch(session: Session, account_id: int, user_id: int | None, role: str | None) -> bool:
-    a = session.get(Account, account_id)
-    if a is None:
-        return False
-    return user_id is None or role == "admin" or a.owner_user_id == user_id
-
-
-def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int,
-                     user_id: int | None = None, role: str | None = None) -> tuple[bool, str]:
+def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int) -> tuple[bool, str]:
     """Confirm a suggested pair: relabel both rows to transfer_out/transfer_in and carry the
     source lot's basis onto the destination. Marks both reviewed so they leave the queue."""
     o, i = session.get(Transaction, out_tx_id), session.get(Transaction, in_tx_id)
@@ -575,9 +557,6 @@ def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int,
         return False, "transaction not found"
     if o.kind not in _OUTFLOW_SUGGEST or i.kind not in _INFLOW_SUGGEST:
         return False, "not an outflow/inflow pair"
-    if not (_can_touch(session, o.account_id, user_id, role)
-            and _can_touch(session, i.account_id, user_id, role)):
-        return False, "not permitted"
     if not _same_owner(session, o.account_id, i.account_id):
         return False, "different owners — that's a gift/disposal, not a self-transfer"
     o.kind, i.kind = TxKind.TRANSFER_OUT, TxKind.TRANSFER_IN
@@ -591,16 +570,12 @@ def confirm_transfer(session: Session, out_tx_id: int, in_tx_id: int,
     return True, ""
 
 
-def reject_suggestion(session: Session, out_tx_id: int, in_tx_id: int,
-                      user_id: int | None = None, role: str | None = None) -> tuple[bool, str]:
+def reject_suggestion(session: Session, out_tx_id: int, in_tx_id: int) -> tuple[bool, str]:
     """Reject a suggested pair: the rows are genuine external buy/sell, not a self-transfer.
     Marks both reviewed so the pairing isn't proposed again."""
     o, i = session.get(Transaction, out_tx_id), session.get(Transaction, in_tx_id)
     if o is None or i is None:
         return False, "transaction not found"
-    if not (_can_touch(session, o.account_id, user_id, role)
-            and _can_touch(session, i.account_id, user_id, role)):
-        return False, "not permitted"
     o.transfer_reviewed = i.transfer_reviewed = True
     session.commit()
     return True, ""

@@ -14,15 +14,8 @@ from app.templating import templates
 router = APIRouter()
 
 
-def _allowed(request: Request) -> bool:
-    # Open mode: anyone. Secured mode: admin only (node config is instance-wide).
-    return (not request.state.secured) or request.state.role == "admin"
-
-
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(
         request, "settings.html",
         {"cfg": (_cfg := node_settings.get_config(session)), "saved": False, "result": None,
@@ -48,8 +41,6 @@ def _transient_conn(provider: str, base_url: str, model: str, api_key: str = "")
 async def llm_add(request: Request, name: str = Form(""), provider: str = Form("ollama"),
                   base_url: str = Form(""), model: str = Form(""),
                   session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     if base_url.strip():
         llm.add_connection(session, name=name, provider=provider, base_url=base_url,
                            model=model)
@@ -58,8 +49,6 @@ async def llm_add(request: Request, name: str = Form(""), provider: str = Form("
 
 @router.get("/settings/llm/{conn_id}/edit-form", response_class=HTMLResponse)
 async def llm_edit_form(conn_id: int, request: Request, session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     return _llm_section(request, session, editing_id=conn_id)
 
 
@@ -67,8 +56,6 @@ async def llm_edit_form(conn_id: int, request: Request, session: Session = Depen
 async def llm_edit(conn_id: int, request: Request, name: str = Form(""), provider: str = Form("ollama"),
                    base_url: str = Form(""), model: str = Form(""),
                    session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     llm.update_connection(session, conn_id, name=name, provider=provider, base_url=base_url,
                           model=model)
     return _llm_section(request, session)
@@ -76,16 +63,12 @@ async def llm_edit(conn_id: int, request: Request, name: str = Form(""), provide
 
 @router.post("/settings/llm/{conn_id}/default", response_class=HTMLResponse)
 async def llm_default(conn_id: int, request: Request, session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     llm.set_default(session, conn_id)
     return _llm_section(request, session)
 
 
 @router.post("/settings/llm/{conn_id}/delete", response_class=HTMLResponse)
 async def llm_delete(conn_id: int, request: Request, session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     llm.delete_connection(session, conn_id)
     return _llm_section(request, session)
 
@@ -94,8 +77,6 @@ async def llm_delete(conn_id: int, request: Request, session: Session = Depends(
 async def llm_test(request: Request, provider: str = Form("ollama"), base_url: str = Form(""),
                    model: str = Form(""),
                    session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     result = llm.test_connection(_transient_conn(provider, base_url, model))
     return templates.TemplateResponse(request, "partials/llm_test.html", {"result": result})
 
@@ -103,8 +84,6 @@ async def llm_test(request: Request, provider: str = Form("ollama"), base_url: s
 @router.post("/settings/llm/models", response_class=HTMLResponse)
 async def llm_models(request: Request, provider: str = Form("ollama"), base_url: str = Form(""),
                      session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     models = llm.list_models(_transient_conn(provider, base_url, ""))
     # Escape: model names come from the (user-pointed-at) server and land in HTML attributes.
     return HTMLResponse("".join(f'<option value="{escape(m)}"></option>' for m in models))
@@ -123,8 +102,6 @@ async def save_settings(
     price_source: str = Form("coinbase"),
     session: Session = Depends(get_session),
 ):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     cfg = node_settings.save_config(
         session, electrum_host=electrum_host, electrum_port=electrum_port, use_ssl=use_ssl,
         use_tor=use_tor, tor_host=tor_host, tor_port=tor_port, mempool_url=mempool_url,
@@ -149,8 +126,6 @@ async def test_settings(
     tor_port: int = Form(9050),
     session: Session = Depends(get_session),
 ):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     if electrum_host.strip():
         outbound.record(electrum_host.strip(), "node connection test")
     result = node_settings.test_params(
@@ -162,7 +137,5 @@ async def test_settings(
 
 @router.post("/settings/outbound/clear")
 async def clear_outbound(request: Request, session: Session = Depends(get_session)):
-    if not _allowed(request):
-        return RedirectResponse("/", status_code=303)
     outbound.clear(session)
     return RedirectResponse("/settings", status_code=303)

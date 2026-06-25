@@ -20,11 +20,9 @@ def _sqlite_pragmas(dbapi_conn, _record):
     """Tune SQLite for a small concurrent web app on a single file:
       - WAL: readers don't block the writer (HTMX fires several requests at once);
       - synchronous=NORMAL: safe with WAL and much faster than FULL.
-    NOTE: we deliberately do NOT enable `PRAGMA foreign_keys=ON` yet. Child cleanup is handled
-    by ORM `cascade="all, delete-orphan"` relationships, and turning on strict enforcement
-    would require ON DELETE rules (e.g. SET NULL on accounts.owner_user_id) plus a table
-    rebuild migration so the documented lockout-reset (deleting `users` rows) still works.
-    Tracked as a follow-up in docs/code-review.md.
+    NOTE: we do NOT enable `PRAGMA foreign_keys=ON` here. Child cleanup is handled by ORM
+    `cascade="all, delete-orphan"` relationships; enabling strict enforcement needs ON DELETE
+    rules + a table-rebuild migration (planned for the Alembic adoption).
     """
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
@@ -57,7 +55,6 @@ def _run_lightweight_migrations() -> None:
             "transfer_reviewed": "INTEGER DEFAULT 0",
         },
         "accounts": {"owner": "VARCHAR DEFAULT ''", "lot_method": "VARCHAR DEFAULT 'fifo'"},
-        "users": {"token_version": "INTEGER DEFAULT 0"},
         "wallets": {"onchain_mode": "VARCHAR DEFAULT 'standalone'",
                     "address_type": "VARCHAR DEFAULT 'auto'"},
         "node_config": {"mempool_url": "VARCHAR DEFAULT ''", "price_source": "VARCHAR DEFAULT 'coinbase'"},

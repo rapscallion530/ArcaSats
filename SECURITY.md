@@ -34,9 +34,9 @@ model so auditors know what to scrutinize, and how to report issues.
 - **Egress boundary:** confirm no addresses/xpubs/amounts/PII leave the machine. Key spots:
   `app/services/electrum.py` (scripthash queries), `app/services/pricing.py` (date-only
   fetches), `app/services/llm.py` (`is_local()` gate), `app/services/outbound.py`.
-- **Access control:** in secured (multi-user) mode, owner-scoping must prevent one user from
-  reading another's accounts. Review `app/services/auth.py`, the auth middleware in
-  `app/main.py`, and `can_access` / `list_accounts(user_id, role)` usage across routers.
+- **Access control:** the app is single-user. An optional app-wide password lock
+  (`BTT_APP_PASSWORD`) gates the whole instance; unset, it's open on loopback. Review the gate
+  in `app/main.py` (middleware) and `app/services/auth.py` (`app_lock_enabled` / `verify_unlock`).
 - **Cost-basis correctness:** `app/services/costbasis.py` (FIFO/LIFO/HIFO, lot consumption,
   transfer/gift basis carry). Tax figures must be deterministic and reproducible.
 - **Crypto:** the pure-Python BIP32/secp256k1 in `app/services/bip32.py` and address/script

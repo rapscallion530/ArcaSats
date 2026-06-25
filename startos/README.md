@@ -22,8 +22,8 @@ truth — the SDK surface evolves faster than docs.
 - **Image:** our root `Dockerfile` (sets `BTT_ASSETS=local`, `BTT_DATA_DIR=/data`).
 - **Data:** persistent volume mounted at `/data` (SQLite + `secret.key`).
 - **Interface:** one `ui` interface on port 8000 → StartOS exposes LAN HTTPS + Tor `.onion`.
-- **Auth:** StartOS is single-admin; this app implements its OWN multi-user mode
-  (`/setup` → admin → members). Leave it in "open mode" for single-user.
+- **Auth:** the app is single-user. It's open within StartOS's authenticated context; set
+  `BTT_APP_PASSWORD` for an extra in-app password lock if you want one.
 - **Dependencies:** electrs (Electrum) for xpub sync, reached at the in-StartOS hostname.
   Set `BTT_ELECTRUM_HOST=electrs.startos` (or the installed electrs package id) and
   `BTT_ELECTRUM_PORT=50001`. For a `.onion` Electrum host, the app routes via Tor

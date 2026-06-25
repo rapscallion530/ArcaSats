@@ -72,7 +72,6 @@ class Account(Base):
     owner: Mapped[str] = mapped_column(String(120), default="")
     lot_method: Mapped[str] = mapped_column(String(10), default="fifo")  # fifo / lifo / hifo
     note: Mapped[str] = mapped_column(Text, default="")
-    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
     wallets: Mapped[list[Wallet]] = relationship(back_populates="account", cascade="all, delete-orphan")
@@ -314,18 +313,4 @@ class LLMConnection(Base):
     model: Mapped[str] = mapped_column(String(120), default="")
     api_key: Mapped[str] = mapped_column(String(255), default="")        # usually blank for local
     is_default: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
-
-
-class User(Base):
-    """Multi-user (Phase 7). Present from the start so FKs resolve."""
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(60), unique=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="member")  # admin / member
-    # Bumped to invalidate all of a user's existing sessions (e.g. on password change /
-    # "sign out everywhere"). Signed into the session token; a mismatch rejects the cookie.
-    token_version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))

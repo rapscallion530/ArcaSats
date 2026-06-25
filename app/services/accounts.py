@@ -33,59 +33,28 @@ class AccountSummary:
 
 
 def create_account(session: Session, name: str, label_kind: str = "", note: str = "",
-                   owner: str = "", owner_user_id: int | None = None) -> Account:
+                   owner: str = "") -> Account:
     acct = Account(name=name.strip(), label_kind=label_kind.strip(), note=note.strip(),
-                   owner=owner.strip(), owner_user_id=owner_user_id)
+                   owner=owner.strip())
     session.add(acct)
     session.commit()
     session.refresh(acct)
     return acct
 
 
-def list_accounts(session: Session, user_id: int | None = None, role: str | None = None) -> list[Account]:
-    q = select(Account).order_by(Account.name)
-    # In secured mode, non-admins see only their own accounts.
-    if user_id is not None and role != "admin":
-        q = q.where(Account.owner_user_id == user_id)
-    return list(session.scalars(q))
-
-
-def can_access(account: Account, user_id: int | None, role: str | None) -> bool:
-    if user_id is None or role == "admin":  # open mode or admin
-        return True
-    return account.owner_user_id == user_id
-
-
-# --- authorization helpers ---------------------------------------------------
-# Every account/wallet/transaction-keyed route MUST resolve through one of these so a user
-# can't reach another owner's data by guessing a sequential id (IDOR). In open mode (no
-# users) can_access() returns True for everyone, so these are no-ops until secured mode.
-def accessible_account(session: Session, account_id: int, user_id: int | None,
-                       role: str | None) -> Account | None:
-    acct = session.get(Account, account_id)
-    return acct if acct is not None and can_access(acct, user_id, role) else None
-
-
-def accessible_wallet(session: Session, wallet_id: int, user_id: int | None,
-                      role: str | None) -> Wallet | None:
-    w = session.get(Wallet, wallet_id)
-    if w is None:
-        return None
-    return w if accessible_account(session, w.account_id, user_id, role) is not None else None
-
-
-def accessible_tx(session: Session, account_id: int, tx_id: int, user_id: int | None,
-                  role: str | None) -> Transaction | None:
-    """Resolve a transaction, requiring BOTH that it belongs to `account_id` AND that the
-    account is accessible — so /accounts/<mine>/transactions/<someone-elses-id> is rejected."""
-    tx = session.get(Transaction, tx_id)
-    if tx is None or tx.account_id != account_id:
-        return None
-    return tx if accessible_account(session, account_id, user_id, role) is not None else None
+def list_accounts(session: Session) -> list[Account]:
+    return list(session.scalars(select(Account).order_by(Account.name)))
 
 
 def get_account(session: Session, account_id: int) -> Account | None:
     return session.get(Account, account_id)
+
+
+def get_tx(session: Session, account_id: int, tx_id: int) -> Transaction | None:
+    """A transaction that belongs to `account_id` (else None) — keeps the URL's account and tx
+    consistent, so /accounts/<a>/transactions/<id-from-another-account> resolves to nothing."""
+    tx = session.get(Transaction, tx_id)
+    return tx if tx is not None and tx.account_id == account_id else None
 
 
 def update_account(session: Session, account_id: int, name: str, label_kind: str = "",
@@ -223,10 +192,10 @@ def summarize(session: Session, account: Account) -> AccountSummary:
                           tx_count=int(row[0] or 0), balance_sats=int(row[1] or 0))
 
 
-def all_summaries(session: Session, user_id: int | None = None, role: str | None = None) -> list[AccountSummary]:
-    """Summaries for all accessible accounts in a fixed number of queries (no per-account
-    fan-out): one grouped query for tx count + balance, one for wallet counts."""
-    accounts = list_accounts(session, user_id, role)
+def all_summaries(session: Session) -> list[AccountSummary]:
+    """Summaries for all accounts in a fixed number of queries (no per-account fan-out): one
+    grouped query for tx count + balance, one for wallet counts."""
+    accounts = list_accounts(session)
     if not accounts:
         return []
     ids = [a.id for a in accounts]

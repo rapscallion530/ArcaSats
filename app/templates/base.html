@@ -89,12 +89,9 @@
             <div class="border-t border-line my-2"></div>
             <div class="flex items-center justify-between px-3 py-1">
               <span class="text-xs px-2 py-0.5 rounded-full bg-tagbg text-tagink">local-only</span>
-              {% if request.state.username %}
-              <span class="text-xs text-muted">{{ request.state.username }}{% if request.state.role == 'admin' %} · admin{% endif %}</span>
-              {% endif %}
             </div>
-            {% if request.state.username %}
-            <form method="post" action="/logout"><button type="submit" class="w-full text-left px-3 py-2 rounded-[8px] text-muted hover:bg-surfaceblue hover:text-heading">Sign out</button></form>
+            {% if app_locked %}
+            <form method="post" action="/logout"><button type="submit" class="w-full text-left px-3 py-2 rounded-[8px] text-muted hover:bg-surfaceblue hover:text-heading">Lock &amp; sign out</button></form>
             {% endif %}
           </div>
         </details>

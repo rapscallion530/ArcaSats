@@ -4,9 +4,10 @@
 
 FastAPI + HTMX + Tailwind. Single-container, SQLite-backed, no data leaves the box.
 
-Auth model: "open mode" when no users exist (no login required — single-user/local),
-"secured mode" once an admin is created via /setup (login required, accounts scoped
-to their owner). This keeps the app frictionless until you opt into multi-user.
+Single-user by design: there are no user accounts. The app is open by default; set
+BTT_APP_PASSWORD to gate the whole instance behind one password (an HMAC-signed cookie marks
+a session unlocked). Real network exposure should sit behind a platform auth gateway
+(StartOS/Umbrel) — see _enforce_exposure_safety.
 """
 import os
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import APP_NAME
-from app.db import SessionLocal, init_db
+from app.db import init_db
 from app.routers import (
     accounts,
     assistant as assistant_router,
@@ -32,9 +33,9 @@ from app.services import auth as auth_svc
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# Paths reachable without a session in secured mode.
-_PUBLIC_EXACT = {"/login", "/setup", "/logout", "/about", "/health", "/favicon.ico"}
-# Paths that need no DB/auth work at all — skip the session entirely (the big per-request win).
+# Paths reachable without unlocking when the optional password lock is on.
+_PUBLIC_EXACT = {"/login", "/logout", "/about", "/health", "/favicon.ico"}
+# Paths that need no work at all — skip everything (the big per-request win).
 _NO_DB_EXACT = {"/health", "/favicon.ico"}
 _NO_DB_PREFIXES = ("/static",)
 # Methods that change state and therefore get a same-origin (CSRF) check.
@@ -49,34 +50,28 @@ def _needs_no_db(path: str) -> bool:
     return path in _NO_DB_EXACT or path.startswith(_NO_DB_PREFIXES)
 
 
-def _enforce_setup_safety() -> None:
-    """Hard boundary against open-mode takeover. If bound to a non-loopback interface (Docker
-    0.0.0.0, Umbrel/StartOS, LAN) while NO admin exists, the first network visitor could claim
-    admin. Refuse to start unless the operator provides an out-of-band BTT_SETUP_TOKEN (which
-    then gates /setup) — or binds to loopback, or creates the admin first."""
+def _enforce_exposure_safety() -> None:
+    """Refuse to start wide-open on a non-loopback interface. If bound to anything other than
+    loopback (Docker 0.0.0.0, LAN, Umbrel/StartOS) with NO app password, anyone reaching the
+    port has full access. Require either BTT_APP_PASSWORD, or BTT_ALLOW_OPEN_EXPOSURE=1 for a
+    platform that fronts the app with its own authenticated gateway."""
     bind = os.environ.get("BTT_BIND_HOST", "127.0.0.1")
     if bind in ("127.0.0.1", "localhost", "::1"):
         return
-    if os.environ.get("BTT_SETUP_TOKEN", ""):
-        return  # setup is token-gated (see routers/auth.py)
+    if os.environ.get("BTT_APP_PASSWORD", ""):
+        return  # the password lock protects it
     if os.environ.get("BTT_ALLOW_OPEN_EXPOSURE", "0") == "1":
-        # Escape hatch for platforms that put their OWN authenticated gateway in front of the
-        # app (StartOS/Umbrel). Set only when access to this port is already authenticated.
-        return
-    with SessionLocal() as session:
-        open_mode = auth_svc.user_count(session) == 0
-    if open_mode:
-        raise RuntimeError(
-            f"Refusing to start: bound to {bind} (non-loopback) with no admin user and no "
-            "BTT_SETUP_TOKEN. Anyone reaching the port could claim admin. Bind to 127.0.0.1, "
-            "create the admin first, or set BTT_SETUP_TOKEN to a secret and open "
-            "/setup?token=<secret> to bootstrap.")
+        return  # a platform gateway (StartOS/Umbrel) authenticates access to this port
+    raise RuntimeError(
+        f"Refusing to start: bound to {bind} (non-loopback) with no BTT_APP_PASSWORD. Anyone "
+        "reaching the port would have full access. Bind to 127.0.0.1, set BTT_APP_PASSWORD to "
+        "gate the app, or set BTT_ALLOW_OPEN_EXPOSURE=1 if an authenticated gateway fronts it.")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    _enforce_setup_safety()
+    _enforce_exposure_safety()
     yield
 
 
@@ -85,14 +80,10 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 @app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    """Attach request.state.user_* , gate app routes in secured mode, and apply a same-origin
-    (CSRF) check to state-changing requests. Static/health requests skip the DB entirely."""
+async def gate_middleware(request: Request, call_next):
+    """Apply a same-origin (CSRF) check to state-changing requests, and — when the optional
+    password lock is enabled — require a valid unlock cookie on non-public routes."""
     path = request.url.path
-    request.state.user_id = None
-    request.state.username = None
-    request.state.role = None
-    request.state.secured = False
 
     # CSRF defense-in-depth (alongside SameSite=lax cookies): reject a state-changing request
     # whose Origin/Referer host doesn't match ours. Missing header (non-browser clients,
@@ -104,27 +95,13 @@ async def auth_middleware(request: Request, call_next):
             if origin_host and origin_host != request.headers.get("host"):
                 return PlainTextResponse("Cross-origin request blocked.", status_code=403)
 
-    # Skip all auth/DB work for static assets, health, favicon — the bulk of requests.
     if _needs_no_db(path):
         return await call_next(request)
 
-    with SessionLocal() as session:
-        # A COUNT on the tiny users table; cheap now that /static et al. skip this entirely.
-        if auth_svc.user_count(session) > 0:
-            request.state.secured = True
-            decoded = auth_svc.decode_token(request.cookies.get("btt_session"))
-            if decoded is not None:
-                uid, _issued, ver = decoded
-                from app.models import User
-                user = session.get(User, uid)
-                # Reject if the user is gone or their token_version was bumped (revoked).
-                if user is not None and user.token_version == ver:
-                    request.state.user_id = user.id
-                    request.state.username = user.username
-                    request.state.role = user.role
-
-    if request.state.secured and request.state.user_id is None and not _is_public(path):
-        return RedirectResponse("/login", status_code=303)
+    # Optional single-password lock: gate everything except public routes until unlocked.
+    if auth_svc.app_lock_enabled() and not _is_public(path):
+        if not auth_svc.verify_unlock(request.cookies.get("btt_session")):
+            return RedirectResponse("/login", status_code=303)
 
     return await call_next(request)
 

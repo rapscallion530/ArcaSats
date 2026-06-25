@@ -2,11 +2,9 @@
 # Copyright (c) 2026 The ArcaSats Authors
 """Accounts: list, create, detail, delete + manual transaction entry.
 
-Authorization: every account/wallet/transaction-keyed handler resolves the target through
-`accounts_svc.accessible_*` and bails out if the caller can't access it. In open (single-user)
-mode this is a no-op; in secured (multi-user) mode it prevents IDOR — reading or mutating
-another owner's data by guessing a sequential id. Full-page GETs redirect on denial; HTMX
-partials return an empty 404/403 (HTMX simply renders nothing).
+Single-user app: handlers resolve account/wallet/tx targets by id (tx routes also require the
+tx to belong to the URL's account). A missing/mismatched id yields an empty 404 partial (HTMX
+renders nothing) or a redirect on a full-page GET.
 """
 from decimal import Decimal
 
@@ -50,22 +48,22 @@ _DENIED_PARTIAL = HTMLResponse("", status_code=404)
 
 # --- scope helpers (see module docstring) ------------------------------------
 def _account(session: Session, account_id: int, request: Request):
-    return accounts_svc.accessible_account(session, account_id, request.state.user_id, request.state.role)
+    return accounts_svc.get_account(session, account_id)
 
 
 def _wallet(session: Session, wallet_id: int, request: Request):
-    return accounts_svc.accessible_wallet(session, wallet_id, request.state.user_id, request.state.role)
+    return accounts_svc.get_wallet(session, wallet_id)
 
 
 def _tx(session: Session, account_id: int, tx_id: int, request: Request):
-    return accounts_svc.accessible_tx(session, account_id, tx_id, request.state.user_id, request.state.role)
+    return accounts_svc.get_tx(session, account_id, tx_id)
 
 
 @router.get("/accounts", response_class=HTMLResponse)
 async def list_accounts(request: Request, session: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request, "accounts.html",
-        {"summaries": accounts_svc.all_summaries(session, request.state.user_id, request.state.role)},
+        {"summaries": accounts_svc.all_summaries(session)},
     )
 
 
@@ -88,11 +86,11 @@ async def create_account(
         existing = {a.name for a in accounts_svc.list_accounts(session)}
         if name not in existing:
             accounts_svc.create_account(session, name=name, label_kind=label_kind, note=note,
-                                        owner=owner, owner_user_id=request.state.user_id)
+                                        owner=owner)
     # Return the refreshed accounts grid (HTMX swaps it in).
     return templates.TemplateResponse(
         request, "partials/accounts_grid.html",
-        {"summaries": accounts_svc.all_summaries(session, request.state.user_id, request.state.role)},
+        {"summaries": accounts_svc.all_summaries(session)},
     )
 
 

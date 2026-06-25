@@ -9,6 +9,7 @@ from markupsafe import Markup, escape
 
 from app import config
 from app.models import SATS_PER_BTC
+from app.services import auth
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -16,6 +17,8 @@ templates.env.globals["ASSETS"] = config.ASSETS
 templates.env.globals["APP_NAME"] = config.APP_NAME
 templates.env.globals["TAGLINE"] = config.TAGLINE
 templates.env.globals["SUPPORT_URL"] = config.SUPPORT_URL
+# Whether the optional single-password lock is on (drives the "Lock & sign out" control).
+templates.env.globals["app_locked"] = auth.app_lock_enabled()
 
 
 def fmt_btc(sats: int | None) -> str:

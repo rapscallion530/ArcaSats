@@ -18,13 +18,12 @@ router = APIRouter()
 async def tax_home(request: Request, session: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request, "tax.html",
-        {"summaries": accounts_svc.all_summaries(session, request.state.user_id, request.state.role)},
+        {"summaries": accounts_svc.all_summaries(session)},
     )
 
 
 def _resolve(session: Session, account_id: int, request: Request):
-    # Owner-scoped: another user can't pull a sibling owner's 8949 / disposal detail by id.
-    account = accounts_svc.accessible_account(session, account_id, request.state.user_id, request.state.role)
+    account = accounts_svc.get_account(session, account_id)
     if account is None:
         return None, None, None, None
     txs = tx_svc.list_transactions(session, account_id)

@@ -6,7 +6,7 @@
 
 A **local-only** US Bitcoin tax & accounting tool, intended to run as a self-hosted service on **StartOS** (Start9) alongside an existing Bitcoin full node / Lightning / mempool / Electrum-server stack. Goal: replace a bitcoin.tax subscription with a private, self-hosted alternative.
 
-> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, multi-user, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **143 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
+> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **139 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
 
 ## License & auditing
 
@@ -18,7 +18,7 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 
 - Import non-custodial wallet activity via **xpub/ypub/zpub** (watch-only), scanned through a local **electrs/Fulcrum** Electrum server on the node — no third-party explorers.
 - Import custodial activity via **CSV export** (Coinbase, Strike, Swan, Bisq, or a generic format).
-- Segregate coins into named **accounts / sub-accounts / labels** (KYC vs non-KYC, or per-person). Single login to start; **per-person logins ("uncle for the family") added later**.
+- Segregate coins into named **accounts / sub-accounts / labels** (KYC vs non-KYC, or per-person). **Single-user instance** (one instance per person); an optional app-wide password lock (`BTT_APP_PASSWORD`) can gate the whole app.
 - Compute **cost basis per account** (FIFO/LIFO/HIFO), with an **informational** per-wallet breakdown. Tax reports are computed at the account level; per-wallet lot accounting is not yet a separate tax engine (see status/audit).
 - Produce **US tax forms** — Form 8949, Schedule D (+ income schedules) — using **per-account** lot accounting. Rev. Proc. 2024-28 (effective 2025-01-01) allows per-account allocation via its safe harbor; if you need strict per-wallet lots, use one account per wallet/exchange location for now. Verify against current IRS guidance.
 
@@ -35,7 +35,7 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 | Jurisdiction | US only (for now) |
 | **Foundation** | **Build from scratch.** Evaluated rotki, RP2+DaLI, and Clams (see `docs/tool-evaluation.md`). Clams rejected: closed-source + mandatory account login. RP2 to be embedded later as the tax-calc engine. |
 | Build approach | MVP first, incremental |
-| Account/user model | Labels/accounts now, per-person logins later |
+| Account model | Single-user instance; accounts/labels for segregation (one instance per person) |
 | Node access | electrs / Fulcrum (Electrum server) |
 | Sources | Coinbase (CSV), Strike (CSV), Swan (CSV), Bisq (CSV), generic (CSV), xpub (on-chain). *Direct exchange APIs removed — CSV only.* |
 | Scale | Moderate — daily DCA plus other activity, mostly buys/transfers, few sells, <500 tx/year |
@@ -51,7 +51,7 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 4. ✅ **Pricing + per-account cost basis** (informational per-wallet view) — FIFO/LIFO/HIFO engine, local price cache.
 5. ✅ **Tax engine** — Form 8949 + Schedule D, per year, CSV export (own FIFO engine, not RP2 — see note).
 6. ➖ **Read-only API connectors** — removed; superseded by CSV import (keeps keys/traffic off third-party APIs).
-7. ✅ **Multi-user logins** — open mode → secured mode, owner-scoped accounts.
+7. ➖ **Multi-user — removed.** Single-user instance; an optional single-password lock (`BTT_APP_PASSWORD`) gates the app when exposed. One instance per person.
 8. ✅ **Packaging** — `startos/` (.s9pk scaffold) + `umbrel/` wrapper; vendored assets (no CDN).
 
 > **Phase 5 note:** the prior plan was to embed RP2 as the tax engine. For a Bitcoin-only,

@@ -22,7 +22,7 @@ async def about(request: Request):
 async def node_status(request: Request, session: Session = Depends(get_session)):
     cfg = node_settings.get_config(session)
     result = node_settings.test_connection(session, timeout=12)
-    summaries = accounts_svc.all_summaries(session, request.state.user_id, request.state.role)
+    summaries = accounts_svc.all_summaries(session)
     return templates.TemplateResponse(
         request, "partials/node_widget.html",
         {
@@ -39,7 +39,7 @@ async def node_status(request: Request, session: Session = Depends(get_session))
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, session: Session = Depends(get_session)):
-    summaries = accounts_svc.all_summaries(session, request.state.user_id, request.state.role)
+    summaries = accounts_svc.all_summaries(session)
     total_sats = sum(s.balance_sats for s in summaries)
     total_wallets = sum(s.wallet_count for s in summaries)
     return templates.TemplateResponse(

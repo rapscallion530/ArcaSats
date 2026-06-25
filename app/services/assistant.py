@@ -31,9 +31,9 @@ def _money(value) -> float:
     return float(Decimal(value).quantize(Decimal("0.01")))
 
 
-def build_snapshot(session: Session, user_id: int | None = None, role: str | None = None) -> dict:
-    """A JSON-serializable summary of the (scoped) portfolio + realized tax figures."""
-    accounts = accounts_svc.list_accounts(session, user_id=user_id, role=role)
+def build_snapshot(session: Session) -> dict:
+    """A JSON-serializable summary of the portfolio + realized tax figures."""
+    accounts = accounts_svc.list_accounts(session)
 
     acct_blocks, disposals_out = [], []
     totals = {"holdings_btc": 0, "holdings_basis_usd": Decimal("0"),
@@ -128,9 +128,8 @@ def build_messages(snapshot: dict, question: str) -> list[dict]:
     ]
 
 
-def ask(session: Session, conn, question: str, user_id: int | None = None,
-        role: str | None = None) -> llm.ChatResult:
+def ask(session: Session, conn, question: str) -> llm.ChatResult:
     if not question.strip():
         return llm.ChatResult(False, error="Type a question first.")
-    snapshot = build_snapshot(session, user_id=user_id, role=role)
+    snapshot = build_snapshot(session)
     return llm.chat(conn, build_messages(snapshot, question))

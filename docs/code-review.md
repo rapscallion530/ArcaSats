@@ -25,7 +25,7 @@ app/
     llm.py           local-LLM client + loopback/LAN privacy gate          <- egress
     outbound.py      Outbound Data Log (host+purpose only)                 <- egress ledger
     auth.py          PBKDF2 + signed session tokens
-    accounts.py      account/wallet ops + owner-scope authorization helpers
+    accounts.py      account/wallet ops
     assistant.py     read-only "Ask your data" snapshot builder
     node_settings.py Electrum/explorer config + locality heuristics
 ```
@@ -38,14 +38,14 @@ code keeps this.
 `llm.py` — all funnel through `outbound.py` for logging. Network is OFF unless
 `BTT_ENABLE_NETWORK=1` (price feed) or the user configures a node/LLM. See `SECURITY.md`.
 
-**Auth model:** "open mode" (no users → no login, single-user local) vs "secured mode" (an
-admin exists → login required, accounts scoped to their owner). The middleware in `main.py`
-and the `accessible_*` helpers in `services/accounts.py` are the enforcement points.
+**Auth model:** single-user — no user accounts. Open by default; set `BTT_APP_PASSWORD` to gate
+the whole instance behind one password (an HMAC-signed unlock cookie). The gate lives in the
+`main.py` middleware (`auth.app_lock_enabled` / `verify_unlock`).
 
 ## Running the checks
 
 ```
-pytest -q                          # 143 tests; crypto vectors, cost-basis, importers, auth,
+pytest -q                          # 139 tests; crypto vectors, cost-basis, importers, lock,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)
@@ -73,9 +73,8 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
 - **Additive-only migrations** — `db.py` does `ALTER TABLE`/`CREATE INDEX` (plus one guarded
   `DROP COLUMN`); it can't do renames or ordered backfills. Adopt **Alembic** before the schema
   grows further.
-- **`PRAGMA foreign_keys=ON` deferred** — first add `ON DELETE SET NULL` to
-  `accounts.owner_user_id` (a table-rebuild migration) so the lockout-reset (deleting `users`
-  rows) still works. ORM cascades handle child cleanup meanwhile.
+- **`PRAGMA foreign_keys=ON` deferred** — to be enabled by the Alembic migration (with the
+  ON DELETE rules + table rebuild). ORM cascades handle child cleanup meanwhile.
 - **Existing-DB dedup** — older DBs still carry the old global `(source, external_id)`
   uniqueness; new DBs use `(account_id, source, external_id)`. A table-rebuild migration would
   drop the old constraint (it over-dedups across accounts meanwhile).
@@ -85,15 +84,13 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
   `node_settings.explorer_is_private`, and pricing's gating each implement their own policy; a
   single audited `assert_local_or_allowed(url)` would ensure no future connector ships without
   the gate.
-- **Per-owner reconcile scope** — `reconcile_internal_transfers`/`internal_txids` operate
-  globally; harmless in single-user/open mode, but in multi-user this crosses owner boundaries.
 - **DNS rebinding** between the locality check and connect is mitigated for the assistant
   (loopback-only + redirect blocking) but not fully eliminated for arbitrary hostnames.
 - **Abstract the price source** — the Coinbase/Bitstamp URLs/schema are hardcoded; an interface
   plus cached "no data" hours would harden and speed it up.
 
 ### Auth / ops
-- **Login rate-limiting / lockout**, and **rehash-on-login** when PBKDF2 params change.
+- **Optional password lock** has no rate-limiting/lockout (low priority — one local password).
 - **Secure-cookie flag** when served over TLS; **WAL-aware backup** (SQLite backup API, not a
   bare file copy); **background sync** with progress/cancel.
 
