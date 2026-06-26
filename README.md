@@ -59,6 +59,29 @@ This is privacy- and money-sensitive software, so **independent auditing is expl
 > proved cleaner and avoids RP2's unfinished per-wallet support + ODS round-trip. RP2 remains a
 > good optional cross-check later.
 
+## Install on Windows (download & run)
+
+For a normal install (no developer setup needed):
+
+1. **Install Python** (one-time) — get **Python 3.12 or newer** from
+   <https://www.python.org/downloads/> and tick **“Add python.exe to PATH”** in the installer.
+2. **Download** the latest **source zip** from the
+   [Releases page](https://github.com/rapscallion530/ArcaSats/releases) (the
+   `Source code (zip)` asset), and **extract** it anywhere (e.g. your Documents folder).
+3. **Run** — open the extracted folder and **double-click `run.bat`**. The first launch creates a
+   local virtual environment and installs dependencies (one-time, ~30s), then opens
+   <http://127.0.0.1:8000> in your browser. Later launches start instantly.
+4. **Add your data** — in the app: **Settings** to point at your own node / pick a price source,
+   then **Accounts → import a CSV** (Coinbase/Strike/Swan/Bisq) or **add an xpub** to sync on-chain
+   activity. Enter your actual prices where you know them (they always win over estimates).
+
+**Your data stays on your machine.** It’s written to a `data\` folder next to the app
+(`data\btt.sqlite` + `secret.key`) — **never** committed or uploaded. The only outbound traffic is
+to *your own* node (Electrum, optionally over Tor) and, if enabled, a public BTC/USD price feed
+(weekly candle windows — reveals only the week of activity, never amounts/addresses/PII). To
+**back up** or **move** to another machine, copy the `data\` folder. To **stop** the app, close the
+console window (or press Ctrl+C). *Tax figures are drafts for your review — not tax advice.*
+
 ## Run it locally (Windows, Python 3.x)
 
 **One click:** double-click `run.bat` (first run sets up the venv + deps, then opens the browser).
