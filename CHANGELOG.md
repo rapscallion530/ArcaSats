@@ -5,6 +5,15 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — "List models" gave no visible feedback
+
+- **[P2] Settings → "List models" looked like it did nothing.** It fetched the model list fine
+  but injected the results only into a hidden `<datalist>` (visible only when you click the Model
+  field), and returned an empty body — with no message — when the server was unreachable or
+  non-loopback. Now the button shows a status line ("Found N model(s) …", or a specific reason:
+  endpoint-not-on-this-machine / server-not-running) and refreshes the datalist out-of-band so the
+  Model input's autocomplete still picks up the options.
+
 ## Unreleased — Swan withdrawals dropped by a too-strict status filter
 
 - **[P0] Swan withdrawals silently dropped → inflated balance.** `_parse_swan_withdrawals` kept

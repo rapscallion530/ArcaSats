@@ -11,6 +11,18 @@ def _aid(name: str) -> int:
         return s.scalar(select(Account.id).where(Account.name == name))
 
 
+def test_llm_models_gives_visible_feedback(client):
+    # "List models" used to silently fill a hidden datalist (looked like nothing happened). The
+    # route now returns a visible status message + refreshes the datalist out-of-band. A non-local
+    # endpoint is deterministic (refused before any network), so assert that branch + the OOB wiring.
+    r = client.post("/settings/llm/models",
+                    data={"provider": "ollama", "base_url": "http://8.8.8.8:11434",
+                          "datalist_id": "models-add"})
+    assert r.status_code == 200
+    assert "isn't on this machine" in r.text                       # visible reason, not blank
+    assert 'id="models-add"' in r.text and "hx-swap-oob" in r.text  # datalist refreshed for the input
+
+
 def test_get_config_seeds_and_saves(session):
     cfg = node_settings.get_config(session)
     assert cfg.id == 1

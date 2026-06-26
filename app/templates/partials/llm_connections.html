@@ -21,16 +21,18 @@
         <label class="text-xs sm:col-span-2"><span class="text-muted">Model</span>
           <input name="model" value="{{ c.model }}" list="models-{{ c.id }}" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
           <datalist id="models-{{ c.id }}"></datalist></label>
+        <input type="hidden" name="datalist_id" value="models-{{ c.id }}">
         <p class="text-xs text-muted sm:col-span-6 mt-1">The assistant only ever sends data to a model on this machine or your LAN (loopback/private address). Non-local endpoints are refused.</p>
         <div class="sm:col-span-6 flex flex-wrap items-center gap-3">
           <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Save</button>
           <button type="button" class="text-sm text-muted hover:text-heading"
-                  hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-{{ c.id }}" hx-swap="innerHTML">List models</button>
+                  hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-status-{{ c.id }}" hx-swap="innerHTML">List models</button>
           <button type="button" class="text-sm text-muted hover:text-heading"
                   hx-post="/settings/llm/test" hx-include="closest form" hx-target="#llm-test" hx-swap="outerHTML">Test</button>
           <button type="button" class="text-sm text-muted hover:text-heading"
                   hx-get="/settings" hx-target="#llm-conns" hx-select="#llm-conns" hx-swap="outerHTML">Cancel</button>
           <span class="htmx-indicator text-xs text-muted">working…</span>
+          <span id="models-status-{{ c.id }}" class="text-xs basis-full"></span>
         </div>
       </form>
       {% else %}
@@ -85,14 +87,16 @@
     <label class="text-xs sm:col-span-2"><span class="text-muted">Model</span>
       <input name="model" placeholder="qwen2.5:7b" list="models-add" autocomplete="off" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
       <datalist id="models-add"></datalist></label>
+    <input type="hidden" name="datalist_id" value="models-add">
     <p class="text-xs text-muted sm:col-span-6 mt-1">Local-only: your data is sent only to a model on this machine or your LAN. Non-local endpoints are refused.</p>
     <div class="sm:col-span-6 flex flex-wrap items-center gap-3">
       <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Add connection</button>
       <button type="button" class="text-sm text-muted hover:text-heading"
-              hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-add" hx-swap="innerHTML">List models</button>
+              hx-post="/settings/llm/models" hx-include="closest form" hx-target="#models-status-add" hx-swap="innerHTML">List models</button>
       <button type="button" class="text-sm text-muted hover:text-heading"
               hx-post="/settings/llm/test" hx-include="closest form" hx-target="#llm-test" hx-swap="innerHTML">Test</button>
       <span class="htmx-indicator text-xs text-muted">working…</span>
+      <span id="models-status-add" class="text-xs basis-full"></span>
     </div>
   </form>
 

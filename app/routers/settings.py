@@ -88,10 +88,25 @@ async def llm_test(request: Request, provider: str = Form("ollama"), base_url: s
 
 @router.post("/settings/llm/models", response_class=HTMLResponse)
 async def llm_models(request: Request, provider: str = Form("ollama"), base_url: str = Form(""),
+                     datalist_id: str = Form("models-add"),
                      session: Session = Depends(get_session)):
     models = llm.list_models(_transient_conn(provider, base_url, ""))
-    # Escape: model names come from the (user-pointed-at) server and land in HTML attributes.
-    return HTMLResponse("".join(f'<option value="{escape(m)}"></option>' for m in models))
+    # Escape: model names + the URL come from the (user-pointed-at) server and land in HTML.
+    opts = "".join(f'<option value="{escape(m)}"></option>' for m in models)
+    dl_id = escape(datalist_id or "models-add")
+    if models:
+        msg = (f'<span class="text-gain">Found {len(models)} model(s)</span> — '
+               "click the Model field to pick one.")
+    elif not llm.assistant_endpoint_allowed(base_url):
+        msg = ('<span class="text-warn">That endpoint isn\'t on this machine.</span> '
+               "The assistant only talks to a loopback address (e.g. http://127.0.0.1:11434); "
+               "set BTT_ASSISTANT_ALLOW_LAN=1 to allow a model elsewhere on your LAN.")
+    else:
+        msg = (f'<span class="text-warn">No models found at {escape(base_url)}.</span> '
+               "Is the model server running there?")
+    # The message swaps into the visible status span (the button's target); the datalist is
+    # refreshed out-of-band so the Model input's autocomplete picks up the new options.
+    return HTMLResponse(f'{msg}<datalist id="{dl_id}" hx-swap-oob="true">{opts}</datalist>')
 
 
 @router.post("/settings", response_class=HTMLResponse)
