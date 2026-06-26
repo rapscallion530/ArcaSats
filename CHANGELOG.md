@@ -5,6 +5,21 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — balance vs holdings consistency
+
+- **[P0] Cost-basis "Holdings" overstated by BTC network fees.** The account balance
+  (`accounts._balance_expr`, shown on the grid + tx-table) subtracts every `fee_sats`, but the
+  cost-basis engine (`CostBasisResult.holding_sats`) ignored `fee_sats` and standalone `FEE` txs —
+  so a Strike Send carrying an on-chain "Fee BTC" made the tile read higher than the balance (the
+  reported 16 vs 11 sats). The balance is correct (the fee BTC left the wallet); `compute` now
+  consumes `fee_sats` (and a standalone `FEE`'s amount) from the lots as a **non-realizing**
+  reduction (sats + basis), even for internal-within transfers, so `holding_sats` equals the
+  account balance. A new invariant test asserts `holding_sats == balance_sats` across
+  buys/sells/fee/transfer/Strike-Send cases so they can't drift. (Realizing the fee's own
+  gain/loss — miner-fee-as-disposal — stays deferred; we only drop its quantity + basis.)
+- **UI:** the tile's "Holdings" → **"Balance"** (and "Holdings by KYC origin" → "Balance by KYC
+  origin"), matching the grid + tx-table; one consistent number. (180 tests.)
+
 ## Unreleased — separate node & mempool connections
 
 Settings lumped the Electrum **node** and the **mempool** into one form with one "Test

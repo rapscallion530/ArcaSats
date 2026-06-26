@@ -331,10 +331,14 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
         internal_within = here_out & here_in & internal
 
     for tx in sorted(txs, key=lambda t: (t.timestamp, t.id or 0)):
-        if tx.txid and tx.txid in internal_within and tx.kind in (TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT):
-            continue  # internal move within this account — no basis change
+        # An internal move between two wallets of THIS account is churn — skip its main amount
+        # (no basis change), but its network fee_sats is still BTC that left, handled below.
+        internal_here = bool(tx.txid and tx.txid in internal_within
+                             and tx.kind in (TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT))
 
-        if tx.kind in TxKind.ACQUISITIONS:
+        if internal_here:
+            pass  # main amount nets to zero across the two sides
+        elif tx.kind in TxKind.ACQUISITIONS:
             # A reconciled transfer_in rebuilds MULTIPLE lots from the source fragments, keeping
             # each one's original acquisition date (holding period tacks) and its own KYC label.
             frag_lots = _carried_fragment_lots(tx)
@@ -344,29 +348,28 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
                     if use_heap:
                         rate = (lot.basis_usd / lot.sats) if lot.sats else Decimal("0")
                         heapq.heappush(hifo_heap, (-rate, len(lots), lot))
-                continue
-
-            basis = _acq_basis(tx)
-            if tx.kind == TxKind.INCOME:
-                res.income_usd += basis
-            if tx.kind == TxKind.TRANSFER_IN and basis == 0:
-                if tx.txid and tx.txid in internal:
-                    res.warnings.append(
-                        f"internal transfer in on {tx.timestamp:%Y-%m-%d} (from another of your "
-                        f"accounts) — set its cost basis to carry the original purchase price."
-                    )
-                else:
-                    res.warnings.append(
-                        f"transfer in on {tx.timestamp:%Y-%m-%d} has no cost basis — set the original "
-                        f"acquisition cost so gains compute correctly."
-                    )
-            if tx.amount_sats > 0:
-                lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis,
-                          source=tx.source, kyc_origin=tx.kyc_origin or "")
-                lots.append(lot)
-                if use_heap:
-                    rate = (basis / tx.amount_sats) if tx.amount_sats else Decimal("0")
-                    heapq.heappush(hifo_heap, (-rate, len(lots), lot))
+            else:
+                basis = _acq_basis(tx)
+                if tx.kind == TxKind.INCOME:
+                    res.income_usd += basis
+                if tx.kind == TxKind.TRANSFER_IN and basis == 0:
+                    if tx.txid and tx.txid in internal:
+                        res.warnings.append(
+                            f"internal transfer in on {tx.timestamp:%Y-%m-%d} (from another of your "
+                            f"accounts) — set its cost basis to carry the original purchase price."
+                        )
+                    else:
+                        res.warnings.append(
+                            f"transfer in on {tx.timestamp:%Y-%m-%d} has no cost basis — set the original "
+                            f"acquisition cost so gains compute correctly."
+                        )
+                if tx.amount_sats > 0:
+                    lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis,
+                              source=tx.source, kyc_origin=tx.kyc_origin or "")
+                    lots.append(lot)
+                    if use_heap:
+                        rate = (basis / tx.amount_sats) if tx.amount_sats else Decimal("0")
+                        heapq.heappush(hifo_heap, (-rate, len(lots), lot))
 
         elif tx.kind in (TxKind.SELL, TxKind.SPEND):
             proceeds = (tx.fiat_value or Decimal("0"))
@@ -380,7 +383,16 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             _dispose(lots, tx, Decimal("0"), res, realize=False, method=method,
                      hifo_heap=hifo_heap if use_heap else None, priority=priority,
                      fifo_cursor=fifo_cursor)
-        # FEE: ignored for basis
+
+        # BTC paid as a network fee (fee_sats), or a standalone FEE tx, leaves the wallet — so it
+        # reduces holdings exactly as it reduces the account balance. Consume it from lots WITHOUT
+        # realizing gain (miner-fee-as-disposal stays deferred); this keeps holding_sats == the
+        # spendable balance. Applies even to internal-within churn (the fee is still spent).
+        fee_qty = (tx.fee_sats or 0) + ((tx.amount_sats or 0) if tx.kind == TxKind.FEE else 0)
+        if fee_qty > 0:
+            _dispose(lots, tx, Decimal("0"), res, realize=False, method=method,
+                     hifo_heap=hifo_heap if use_heap else None, priority=priority,
+                     fifo_cursor=fifo_cursor, qty=fee_qty, consume_only=True)
 
     res.open_lots = [lot for lot in lots if lot.sats > 0]
     return res
@@ -389,8 +401,12 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
 def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasisResult,
              realize: bool, method: str = "fifo",
              hifo_heap: list[tuple[Decimal, int, Lot]] | None = None,
-             priority: str = "none", fifo_cursor: list[int] | None = None) -> None:
-    need = tx.amount_sats
+             priority: str = "none", fifo_cursor: list[int] | None = None,
+             qty: int | None = None, consume_only: bool = False) -> None:
+    # `qty` overrides the amount consumed (used to consume fee BTC, not tx.amount_sats).
+    # `consume_only` reduces lots (sats + basis) WITHOUT recording anything — no Disposal, no
+    # transfer_out fragments/basis, no shortfall warning — so a network fee just shrinks holdings.
+    need = tx.amount_sats if qty is None else qty
     total = need
     consumed_basis = Decimal("0")
     while need > 0:
@@ -416,7 +432,7 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
         basis_portion = (lot.basis_usd * Decimal(take) / Decimal(lot.sats)) if lot.sats else Decimal("0")
         consumed_basis += basis_portion
         _k = tx_key(tx)
-        if not realize and _k:
+        if not realize and _k and not consume_only:
             res.transfer_out_lots.setdefault(_k, []).append(
                 {"acquired": lot.acquired, "sats": take, "basis": basis_portion.quantize(_CENTS),
                  "kyc": lot.kyc_origin}
@@ -438,7 +454,7 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
             elif idx is not None:
                 del lots[idx]
 
-    if need > 0:
+    if need > 0 and not consume_only:
         # Disposed more than we have lots for — missing acquisition history. We record the
         # shortfall as a ZERO-BASIS, SHORT-TERM disposal: zero basis is the conservative IRS
         # treatment (maximizes reported gain) when basis is unsubstantiated, and we can't know
@@ -460,7 +476,7 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
 
     # Record basis consumed by a transfer_out, so a cross-account transfer can carry it.
     _k = tx_key(tx)
-    if not realize and _k:
+    if not realize and _k and not consume_only:
         res.transfer_out_basis[_k] = res.transfer_out_basis.get(_k, Decimal("0")) + consumed_basis
 
 

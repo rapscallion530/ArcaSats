@@ -30,7 +30,7 @@ Comparing the Codex-generated requirements (2026-06-17) against what's built. Le
 14. UX — 🟡 dashboard/accounts/tax + node widget; ❌ first-run wizard, timeline, wallet map, UTXO explorer, reconciliation/missing-data inboxes.
 
 ## Built beyond the list
-Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, KYC origin on cost-basis lots + KYC-aware disposal priority, address-based fuzzy-hop detection, price-source registry abstraction, separate node/mempool connections (each tested independently; mempool over Tor), 177 tests.
+Single-user (optional app-wide password lock), in-app node settings (Sparrow-style Tor toggle), node status widget, cross-account basis carry + per-transfer carry on/off, account/wallet/tx edit+delete, auto script-type detection, KYC origin on cost-basis lots + KYC-aware disposal priority, address-based fuzzy-hop detection, price-source registry abstraction, separate node/mempool connections (each tested independently; mempool over Tor), unified "Balance" (holding_sats == account balance; BTC fees reduce both), 180 tests.
 
 ## Assessment of the spec
 - **Agree** with ~90%: privacy model, electrs/Tor, gift handling, FIFO default, reconciliation, 1099-DA caution, auditability, immutable pricing.

@@ -366,6 +366,61 @@ def test_account_detail_shows_cost_basis(client):
     assert "5,000" in r.text  # realized short-term gain $5,000
 
 
+def test_holding_sats_equals_balance_across_fees(session):
+    # INVARIANT: the cost-basis "Balance" (holding_sats) must equal the account balance
+    # (accounts.balance_sats) — the bug was a BTC network fee subtracted from one but not the other.
+    import datetime as dt
+    from app.services import accounts as acc
+    from app.services import transactions as txsvc
+
+    # 1) buy + sell, no fee
+    a = acc.create_account(session, name="INV1")
+    txsvc.add_transaction(session, account_id=a.id, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 1),
+                          amount_sats=1000, fiat_value=Decimal("100"))
+    txsvc.add_transaction(session, account_id=a.id, kind=TxKind.SELL, timestamp=dt.datetime(2025, 2, 1),
+                          amount_sats=400, fiat_value=Decimal("50"))
+    assert costbasis.compute_account(session, a.id).holding_sats == acc.balance_sats(session, a.id) == 600
+
+    # 2) sell with a BTC network fee — fee reduces holdings to match balance (1000 - 400 - 5)
+    b = acc.create_account(session, name="INV2")
+    txsvc.add_transaction(session, account_id=b.id, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 1),
+                          amount_sats=1000, fiat_value=Decimal("100"))
+    txsvc.add_transaction(session, account_id=b.id, kind=TxKind.SELL, timestamp=dt.datetime(2025, 2, 1),
+                          amount_sats=400, fee_sats=5, fiat_value=Decimal("50"))
+    assert costbasis.compute_account(session, b.id).holding_sats == acc.balance_sats(session, b.id) == 595
+
+    # 3) standalone FEE tx (1000 - 7)
+    c = acc.create_account(session, name="INV3")
+    txsvc.add_transaction(session, account_id=c.id, kind=TxKind.BUY, timestamp=dt.datetime(2025, 1, 1),
+                          amount_sats=1000, fiat_value=Decimal("100"))
+    txsvc.add_transaction(session, account_id=c.id, kind=TxKind.FEE, timestamp=dt.datetime(2025, 2, 1),
+                          amount_sats=7)
+    assert costbasis.compute_account(session, c.id).holding_sats == acc.balance_sats(session, c.id) == 993
+
+
+def test_strike_send_with_btc_fee_balance_matches(session):
+    # The exact reported bug: a Strike Send with an on-chain Fee BTC. balance and holdings must agree.
+    from app.services import accounts as acc
+    from app.services.importers import csv_import
+    a = acc.create_account(session, name="StrikeFee")
+    csv_text = ("Transaction ID,Time (UTC),Status,Transaction Type,Amount USD,Fee USD,Amount BTC,Fee BTC,Description,Exchange Rate,Transaction Hash\n"
+                "t1,Jan 01 2025 00:00:00,Completed,Purchase,-100,,0.00000100,,,100000.00,\n"
+                "t2,Feb 01 2025 00:00:00,Completed,Send,,,-0.00000050,0.00000005,,,abcd1234\n")
+    csv_import.import_csv(session, account_id=a.id, source="strike", text=csv_text)
+    cb = costbasis.compute_account(session, a.id)
+    assert cb.holding_sats == acc.balance_sats(session, a.id) == 45   # 100 - 50 - 5(fee), was 50 vs 45
+
+
+def test_dispose_consume_only_reduces_without_recording():
+    import datetime as dt
+    lots = [costbasis.Lot(acquired=dt.datetime(2025, 1, 1), sats=100, basis_usd=Decimal("100"))]
+    res = costbasis.CostBasisResult()
+    t = tx(1, TxKind.SELL, "2025-02-01", "0")
+    costbasis._dispose(lots, t, Decimal("0"), res, realize=False, qty=10, consume_only=True)
+    assert lots[0].sats == 90 and lots[0].basis_usd == Decimal("90")   # sats AND basis reduced
+    assert res.disposals == [] and res.transfer_out_lots == {} and res.transfer_out_basis == {}
+
+
 def test_sell_exceeding_lots_warns_and_zero_basis():
     txs = [
         tx(1, TxKind.BUY, "2025-01-01", "0.1", usd="9000"),

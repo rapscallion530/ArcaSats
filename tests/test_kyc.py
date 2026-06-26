@@ -274,7 +274,7 @@ def test_cost_basis_tile_shows_kyc_breakdown(client):
                 data={"kind": "buy", "timestamp": "2025-01-01", "amount_btc": "1.0", "fiat_value": "30000"})
     r = client.get(f"/accounts/{aid}")
     assert r.status_code == 200
-    assert "Holdings by KYC origin" in r.text
+    assert "Balance by KYC origin" in r.text
     assert "KYC" in r.text
 
 
