@@ -5,6 +5,17 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — native desktop window (no more Ctrl+C to quit)
+
+- **[P2] Unprofessional exit.** The Windows launch left a console you had to Ctrl+C. `run.bat`
+  now opens ArcaSats in its **own native window** (pywebview / WebView2) with no console; **closing
+  the window stops the server and exits**. New `desktop.py` runs uvicorn in a daemon thread and
+  owns the GUI on the main thread; it picks a free port and degrades to a browser tab if a native
+  window isn't available. pywebview is an **optional** desktop-only dep (`requirements-desktop.txt`)
+  — the core `requirements.txt`, the Docker image, and the headless `uvicorn app.main:app` path
+  (server / StartOS) are untouched, and a non-loopback `BTT_BIND_HOST` keeps the classic headless
+  flow. Tests stub the GUI + server to cover the start/stop lifecycle and browser fallback.
+
 ## Unreleased — "List models" gave no visible feedback
 
 - **[P2] Settings → "List models" looked like it did nothing.** It fetched the model list fine

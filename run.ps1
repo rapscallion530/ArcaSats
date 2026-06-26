@@ -26,9 +26,26 @@ if (-not (Test-Path ".venv")) {
     & $pyCmd @pyArgs -m venv .venv
     .\.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
     .\.venv\Scripts\python.exe -m pip install --quiet -r requirements.txt
+    # Optional: native-window support so the app runs in its own window (no console/browser tab).
+    .\.venv\Scripts\python.exe -m pip install --quiet -r requirements-desktop.txt 2>$null
 }
 
-$displayHost = if ($bindHost -eq "0.0.0.0") { "127.0.0.1" } else { $bindHost }
-Write-Host "Starting ArcaSats at http://${displayHost}:8000  (Ctrl+C to stop)"
-Start-Process "http://${displayHost}:8000"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host $bindHost --port 8000
+# Native window when available + we're loopback-only (the desktop case). A tailnet/LAN bind
+# (BTT_BIND_HOST) means a headless server, so keep the classic browser path there.
+.\.venv\Scripts\python.exe -c "import webview" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    .\.venv\Scripts\python.exe -m pip install --quiet -r requirements-desktop.txt 2>$null
+    .\.venv\Scripts\python.exe -c "import webview" 2>$null
+}
+$haveWindow = ($LASTEXITCODE -eq 0)
+
+if ($haveWindow -and ($bindHost -eq "127.0.0.1")) {
+    Write-Host "Launching ArcaSats in its own window. Close the window to quit."
+    # pythonw = no console; Start-Process detaches it so this console can close.
+    Start-Process -FilePath ".\.venv\Scripts\pythonw.exe" -ArgumentList "desktop.py" -WorkingDirectory $PSScriptRoot
+} else {
+    $displayHost = if ($bindHost -eq "0.0.0.0") { "127.0.0.1" } else { $bindHost }
+    Write-Host "Starting ArcaSats at http://${displayHost}:8000  (Ctrl+C to stop)"
+    Start-Process "http://${displayHost}:8000"
+    .\.venv\Scripts\python.exe -m uvicorn app.main:app --host $bindHost --port 8000
+}

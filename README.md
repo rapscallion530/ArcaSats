@@ -6,7 +6,7 @@
 
 A **local-only** US Bitcoin tax & accounting tool, intended to run as a self-hosted service on **StartOS** (Start9) alongside an existing Bitcoin full node / Lightning / mempool / Electrum-server stack. Goal: replace a bitcoin.tax subscription with a private, self-hosted alternative.
 
-> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **187 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
+> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **190 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
 
 ## License & auditing
 
@@ -69,8 +69,10 @@ For a normal install (no developer setup needed):
    [Releases page](https://github.com/rapscallion530/ArcaSats/releases) (the
    `Source code (zip)` asset), and **extract** it anywhere (e.g. your Documents folder).
 3. **Run** — open the extracted folder and **double-click `run.bat`**. The first launch creates a
-   local virtual environment and installs dependencies (one-time, ~30s), then opens
-   <http://127.0.0.1:8000> in your browser. Later launches start instantly.
+   local virtual environment and installs dependencies (one-time, ~30s), then **opens ArcaSats in
+   its own window** — no terminal to keep open. **Close the window to quit.** Later launches start
+   instantly. *(If a native window isn't available on your system, it falls back to opening
+   <http://127.0.0.1:8000> in your browser.)*
 4. **Add your data** — in the app: **Settings** to point at your own node / pick a price source,
    then **Accounts → import a CSV** (Coinbase/Strike/Swan/Bisq) or **add an xpub** to sync on-chain
    activity. Enter your actual prices where you know them (they always win over estimates).
@@ -79,22 +81,27 @@ For a normal install (no developer setup needed):
 (`data\btt.sqlite` + `secret.key`) — **never** committed or uploaded. The only outbound traffic is
 to *your own* node (Electrum, optionally over Tor) and, if enabled, a public BTC/USD price feed
 (weekly candle windows — reveals only the week of activity, never amounts/addresses/PII). To
-**back up** or **move** to another machine, copy the `data\` folder. To **stop** the app, close the
-console window (or press Ctrl+C). *Tax figures are drafts for your review — not tax advice.*
+**back up** or **move** to another machine, copy the `data\` folder. To **stop** the app, just
+**close the ArcaSats window**. *Tax figures are drafts for your review — not tax advice.*
 
 ## Run it locally (Windows, Python 3.x)
 
-**One click:** double-click `run.bat` (first run sets up the venv + deps, then opens the browser).
+**One click:** double-click `run.bat` (first run sets up the venv + deps, then opens ArcaSats in
+its own window; close the window to quit).
 
 Or manually:
 
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload   # headless server (browser tab)
 ```
 
 Then open <http://127.0.0.1:8000>. Health check: <http://127.0.0.1:8000/health>.
+
+For the **native-window** experience (no console/tab): `pip install -r requirements-desktop.txt`
+then `.\.venv\Scripts\pythonw.exe desktop.py`. The headless `uvicorn app.main:app` path
+(server / StartOS / Docker) is unchanged and never needs the desktop dependency.
 
 ## Windows now → StartOS later (same code)
 

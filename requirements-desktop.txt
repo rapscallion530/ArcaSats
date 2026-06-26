@@ -1,0 +1,5 @@
+# Optional desktop-only dependency: run ArcaSats in a native OS window (see desktop.py / run.bat).
+# NOT installed in the server / Docker image (core requirements.txt stays lean, and pythonnet's
+# native bits don't belong in the Linux container). On Windows, pywebview uses the WebView2
+# runtime (preinstalled on Win10/11). If this isn't installed, run.bat falls back to a browser tab.
+pywebview>=5.0
