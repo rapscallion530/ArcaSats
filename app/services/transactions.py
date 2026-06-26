@@ -69,6 +69,7 @@ def add_transaction(
     external_id: str | None = None,
     note: str = "",
     kyc_origin: str = "",
+    commit: bool = True,
 ) -> Transaction | None:
     """Insert a transaction. Returns None if it's a duplicate (source+external_id).
 
@@ -79,6 +80,11 @@ def add_transaction(
     (buy/income/opening) so the cost-basis engine can report holdings/gains by KYC class. It's
     derived centrally from the account here (so importers/routes need not pass it); an explicit
     value wins. Mirrors how Utxo.label_kind is snapshotted at sync.
+
+    commit=True (default) commits immediately and de-dupes via the (account, source, external_id)
+    unique constraint (returns None on conflict). Bulk importers pass commit=False to add many
+    rows in one transaction and commit once at the end; they MUST pre-filter duplicates themselves
+    (the constraint would otherwise abort the whole batch), and the returned tx is unflushed.
     """
     if kind not in TxKind.ALL:
         raise ValueError(f"unknown kind: {kind}")
@@ -103,6 +109,8 @@ def add_transaction(
         kyc_origin=kyc_origin,
     )
     session.add(tx)
+    if not commit:
+        return tx  # caller batches the commit (and has pre-filtered duplicates)
     try:
         session.commit()
     except IntegrityError:

@@ -250,6 +250,25 @@ def test_lot_methods_fifo_lifo_hifo():
     assert hifo.holding_basis_usd == Decimal("20000.00")
 
 
+def test_fifo_full_consume_is_linear():
+    # A fully-consumed FIFO ledger (8k 1-sat buys, then 8k 1-sat sells). The old `del lots[0]`
+    # made this O(n^2); the forward cursor makes it O(n). Results unchanged: each sell realizes
+    # proceeds 2 - basis 1 = 1.
+    import time
+    txs, tid = [], 1
+    for i in range(8000):
+        txs.append(tx(tid, TxKind.BUY, f"2025-01-{(i % 28) + 1:02d}", "0.00000001", usd="1")); tid += 1
+    for i in range(8000):
+        txs.append(tx(tid, TxKind.SELL, f"2025-06-{(i % 28) + 1:02d}", "0.00000001", usd="2")); tid += 1
+    start = time.perf_counter()
+    r = costbasis.compute(txs, method="fifo")
+    elapsed = time.perf_counter() - start
+    assert r.holding_sats == 0
+    assert len(r.disposals) == 8000
+    assert r.realized_total_usd == Decimal("8000.00")
+    assert elapsed < 2.0
+
+
 def test_hifo_medium_ledger_uses_fast_selector():
     import time
 

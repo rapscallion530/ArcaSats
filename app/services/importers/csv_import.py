@@ -193,10 +193,11 @@ def _map_kind(table: dict, raw: str) -> str | None:
 
 
 # --- parsers -----------------------------------------------------------------
+# Each parser receives rows whose keys/values are already normalized by import_csv (lowercased,
+# stripped via _norm_keys), so they index columns directly with _get(r, ...).
 def parse_generic(rows: list[dict]) -> list[NormalizedTx]:
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         kind = _map_kind(_GENERIC_KIND, _get(r, "kind", "type", "event", "transaction type"))
         if not kind:
             continue
@@ -220,8 +221,7 @@ def parse_coinbase(rows: list[dict]) -> list[NormalizedTx]:
     is skipped by _strip_preamble. Timestamps carry a " UTC" suffix; negatives are accounting-
     style "($84.63)". Only BTC rows are kept."""
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         asset = _get(r, "asset", "currency").upper()
         if asset and asset != "BTC":
             continue
@@ -268,8 +268,7 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
     until the user connects them to one of their own wallets. Bill-pay (pay a USD bill with BTC)
     is a Sale (the BTC disposal, kept) + a Withdrawal (the USD to the biller, skipped)."""
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         status = _get(r, "status").lower()
         if status and status not in ("completed", "complete", "settled"):
             continue
@@ -299,7 +298,7 @@ def parse_swan(rows: list[dict]) -> list[NormalizedTx]:
     column; the on-chain withdrawals export has none (identify it by its own columns)."""
     if not rows:
         return []
-    cols = {(k or "").strip().lower() for k in rows[0].keys()}
+    cols = set(rows[0])  # keys already normalized (lowercased/stripped) by import_csv
     if "bitcoin amount" in cols and "created at" in cols:
         return _parse_swan_withdrawals(rows)
     return _parse_swan_transactions(rows)
@@ -314,8 +313,7 @@ def _parse_swan_transactions(rows: list[dict]) -> list[NormalizedTx]:
     BTC rows default to buy/sell (purchase/deposit -> buy); the reconciler upgrades a row to a
     transfer when a shared txid connects it to one of your own wallets."""
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         asset = _get(r, "asset type", "asset")
         if asset and asset.upper() != "BTC":          # USD funding / fees -> not a BTC event
             continue
@@ -342,8 +340,7 @@ def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
     ID is the on-chain txid — carried into the `txid` field so that when you load the receiving
     self-custody wallet, the reconciler connects the two and upgrades this to a transfer."""
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         status = _get(r, "status").lower()
         if status and status != "settled":            # only settled withdrawals actually executed
             continue
@@ -362,8 +359,7 @@ def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
 
 def parse_bisq(rows: list[dict]) -> list[NormalizedTx]:
     out = []
-    for row in rows:
-        r = _norm_keys(row)
+    for r in rows:
         kind = _map_kind(_CUSTODIAL_KIND, _get(r, "type", "trade type", "direction"))
         if not kind:
             continue
@@ -399,7 +395,7 @@ def import_csv(
 
     try:
         reader = csv.DictReader(io.StringIO(_strip_preamble(text)))
-        rows = list(reader)
+        rows = [_norm_keys(row) for row in reader]  # normalize keys/values once for every parser
     except Exception as exc:  # noqa: BLE001
         result.errors.append(f"could not parse CSV: {exc}")
         return result
@@ -429,6 +425,13 @@ def persist_records(
     Idempotent: (account_id, source, external_id-or-stable-hash) uniqueness skips duplicates.
     """
     result = result or ImportResult()
+    # Preload this source's existing external_ids once, so we de-dupe in Python and add new rows
+    # in a SINGLE transaction (was a commit per row + an IntegrityError round-trip per duplicate).
+    from sqlalchemy import select
+    from app.models import Transaction
+    seen = set(session.scalars(select(Transaction.external_id).where(
+        Transaction.account_id == account_id, Transaction.source == source)))
+    added = False
     for n in records:
         # Reject (with a reason) rather than silently coerce — a wrong date lands in the wrong
         # tax year; a zeroed amount corrupts the ledger.
@@ -439,16 +442,20 @@ def persist_records(
             result.rejected.append(f"{n.kind} on {n.timestamp:%Y-%m-%d}: skipped — zero/invalid amount.")
             continue
         ext = n.external_id or _stable_id(source, n)
-        tx = tx_svc.add_transaction(
+        if ext in seen:                 # duplicate (re-import) or repeated within this file
+            result.skipped += 1
+            continue
+        seen.add(ext)
+        tx_svc.add_transaction(
             session, account_id=account_id, wallet_id=wallet_id, kind=n.kind,
             timestamp=n.timestamp, amount_sats=n.amount_sats, fee_sats=n.fee_sats,
             price_usd=n.price_usd, fiat_value=n.fiat_value, fiat_fee=n.fiat_fee,
             fiat_source="actual",  # exchange-reported USD is the real transacted amount
             txid=n.txid, address=n.address, counterparty=n.counterparty,
-            source=source, external_id=ext, note=n.note,
+            source=source, external_id=ext, note=n.note, commit=False,
         )
-        if tx is None:
-            result.skipped += 1
-        else:
-            result.imported += 1
+        result.imported += 1
+        added = True
+    if added:
+        session.commit()
     return result

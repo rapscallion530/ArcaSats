@@ -5,6 +5,26 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — efficiency + cleanup pass
+
+- **[P1] Batched import commits.** `transactions.add_transaction` gained `commit=False`;
+  `csv_import.persist_records` now preloads the source's existing `external_id`s, de-dupes in
+  Python, and writes new rows in a **single** transaction (was a commit + IntegrityError
+  round-trip per row). `xpub.import_xpub` likewise loads existing rows once and commits once.
+- **[P1] Fewer per-request queries.** `account_detail` computes `internal_txids` and the node
+  config once and reuses them (`compute_account_breakdown` accepts a precomputed `internal` set);
+  the config was fetched twice and `internal_txids` ran twice per load.
+- **[P1] FIFO consumption O(n²) → O(n).** Default FIFO advanced via `del lots[0]` (an O(n) list
+  shift per consumed lot); it now walks a forward cursor and leaves spent lots in place (filtered
+  from `open_lots`). Results byte-identical (guarded by a full-consume perf test).
+- **[P2] Shared HTTP helper.** The `Request → urlopen → json.loads` boilerplate duplicated across
+  the five price fetchers is now `pricing._get_json` (llm.py keeps its own redirect/locality-gated
+  client).
+- **[P2] CSV row normalization once.** `import_csv` normalizes row keys/values a single time;
+  parsers no longer each call `_norm_keys` per row.
+
+No behavior change (FMV, cost basis, import dedup all identical). (168 tests.)
+
 ## Unreleased — price-source abstraction
 
 Per-source pricing behavior was scattered across five parallel module dicts/tuples

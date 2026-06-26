@@ -111,6 +111,19 @@ def upsert_hour(session: Session, bucket_start: dt.datetime, price: Decimal, sou
     session.commit()
 
 
+# --- shared HTTP helper ------------------------------------------------------
+_HTTP_HEADERS = {"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"}
+
+
+def _get_json(url: str, timeout: float = 12.0):
+    """GET `url` and parse JSON — the HTTP boilerplate shared by every price fetcher. Callers
+    wrap this in their own try/`_FETCH_ERRORS` and interpret the shape; `BTT_ENABLE_NETWORK` is
+    gated by the callers before they reach here."""
+    req = urllib.request.Request(url, headers=_HTTP_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode())
+
+
 # --- daily close (per-date fallback when a 15m candle is missing) ------------
 def _fetch_coinbase_daily(d: dt.date, timeout: float = 12.0) -> Decimal | None:
     """Coinbase Exchange daily close (keyless). BTT_ENABLE_NETWORK only. Public data, no PII."""
@@ -119,9 +132,7 @@ def _fetch_coinbase_daily(d: dt.date, timeout: float = 12.0) -> Decimal | None:
     url = (f"https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400"
            f"&start={d:%Y-%m-%d}T00:00:00Z&end={d:%Y-%m-%d}T23:59:59Z")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            rows = json.loads(resp.read().decode())
+        rows = _get_json(url, timeout)
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], list) or len(rows[0]) < 5:
             return None
         return Decimal(str(rows[0][4])).quantize(Decimal("0.01"))  # candle = [time,low,high,open,close,vol]
@@ -135,9 +146,7 @@ def _fetch_bitstamp_daily(d: dt.date, timeout: float = 12.0) -> Decimal | None:
     start = int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.UTC).timestamp())
     url = f"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1&start={start}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = json.loads(resp.read().decode())
+        body = _get_json(url, timeout)
         ohlc = (body.get("data") or {}).get("ohlc") or []
         return Decimal(str(ohlc[0]["close"])).quantize(Decimal("0.01")) if ohlc else None
     except _FETCH_ERRORS:
@@ -171,9 +180,7 @@ def _fetch_coinbase_candles(start: dt.datetime, end: dt.datetime, timeout: float
     url = (f"https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity={_GRANULARITY_SECONDS}"
            f"&start={start:%Y-%m-%dT%H:%M:%S}Z&end={end:%Y-%m-%dT%H:%M:%S}Z")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            rows = json.loads(resp.read().decode())
+        rows = _get_json(url, timeout)
         if not isinstance(rows, list):
             return []
         out = []
@@ -194,9 +201,7 @@ def _fetch_bitstamp_candles(start: dt.datetime, end: dt.datetime, timeout: float
     url = (f"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step={_GRANULARITY_SECONDS}&limit=1000"
            f"&start={s}&end={e}")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = json.loads(resp.read().decode())
+        body = _get_json(url, timeout)
         ohlc = (body.get("data") or {}).get("ohlc") or []
         out = []
         for c in ohlc:
@@ -289,9 +294,7 @@ def _fetch_mempool_price(mempool_url: str, ts: dt.datetime, timeout: float = 12.
     unix = int(ts.replace(tzinfo=dt.UTC).timestamp())
     url = f"{mempool_url.rstrip('/')}/api/v1/historical-price?currency=USD&timestamp={unix}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "bitcoin-tax-tracker", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = json.loads(resp.read().decode())
+        body = _get_json(url, timeout)
         prices = body.get("prices") or []
         if not prices:
             return None

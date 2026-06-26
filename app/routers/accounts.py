@@ -103,8 +103,12 @@ async def account_detail(account_id: int, request: Request, session: Session = D
     summary = accounts_svc.summarize(session, account)
     txs = tx_svc.list_transactions(session, account_id)
     wallets = accounts_svc.list_wallets(session, account_id)
+    # Compute the internal-transfer set + node config ONCE and reuse (the breakdown and the tx
+    # table both need internal_txids; the config was fetched twice).
+    internal = costbasis.internal_txids(session)
+    cfg = node_settings.get_config(session)
     # One ledger load for the account result + every per-wallet result (no N+1 recompute).
-    cb, per_wallet_raw = costbasis.compute_account_breakdown(session, account_id)
+    cb, per_wallet_raw = costbasis.compute_account_breakdown(session, account_id, internal=internal)
     label_by_wallet = {w.id: w.label for w in wallets}
     per_wallet = [
         (label_by_wallet.get(wid, "Unassigned") if wid is not None else "Unassigned", res)
@@ -114,10 +118,9 @@ async def account_detail(account_id: int, request: Request, session: Session = D
         request, "account_detail.html",
         {"account": account, "summary": summary, "txs": txs, "kinds": TxKind.ALL,
          "labels": TxKind.LABELS, "wallets": wallets,
-         "electrum_host": node_settings.get_config(session).electrum_host,
-         "mempool_url": node_settings.get_config(session).mempool_url,
+         "electrum_host": cfg.electrum_host, "mempool_url": cfg.mempool_url,
          "cb": cb, "per_wallet": per_wallet, "network_enabled": config.ENABLE_NETWORK,
-         "internal_txids": costbasis.internal_txids(session)},
+         "internal_txids": internal},
     )
 
 

@@ -332,6 +332,13 @@ def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_l
 
     mode = wallet.onchain_mode or "standalone"
     src = f"xpub:{wallet.id}"
+    # Existing rows for this wallet-source, keyed by direction-ext, loaded once (was a SELECT per
+    # tx); new rows are added with commit=False and flushed in a single commit at the end.
+    existing_by_ext = {
+        t.external_id: t for t in session.scalars(select(Transaction).where(
+            Transaction.account_id == wallet.account_id, Transaction.source == src))
+    }
+    changed = False
     for oc in scan.txs:
         inflow = oc.net_sats > 0
         direction = "in" if inflow else "out"
@@ -343,9 +350,7 @@ def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_l
         # the existing row instead of inserting a duplicate.
         ext = f"{oc.txid}:{direction}"
         note = f"block {oc.height}" if oc.height else "mempool"
-        existing = session.scalar(select(Transaction).where(
-            Transaction.account_id == wallet.account_id, Transaction.source == src,
-            Transaction.external_id == ext))
+        existing = existing_by_ext.get(ext)
         if existing is not None:
             # Re-sync: refresh the on-chain facts but PRESERVE kind — it may have been
             # reclassified (cross-wallet transfer) or edited by the user.
@@ -353,17 +358,17 @@ def import_xpub(session: Session, *, wallet: Wallet, client: ElectrumLike, gap_l
             existing.timestamp = oc.timestamp
             existing.address = oc.address
             existing.note = note
-            session.commit()
+            changed = True
             res.skipped += 1
             continue
-        tx = tx_svc.add_transaction(
+        existing_by_ext[ext] = tx_svc.add_transaction(
             session, account_id=wallet.account_id, wallet_id=wallet.id, kind=kind,
             timestamp=oc.timestamp, amount_sats=abs(oc.net_sats), txid=oc.txid,
             address=oc.address, counterparty="on-chain", source=src,
-            external_id=ext, note=note,
-        )
-        if tx is None:
-            res.skipped += 1
-        else:
-            res.imported += 1
+            external_id=ext, note=note, commit=False,
+        )  # cache the new (unflushed) row so a repeat ext in this scan updates in place
+        res.imported += 1
+        changed = True
+    if changed:
+        session.commit()
     return res

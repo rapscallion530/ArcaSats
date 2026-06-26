@@ -316,6 +316,10 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
     # The HIFO heap is an ordering optimization; a KYC priority reorders selection, so use it
     # only on the default path. (Selection then goes through the linear _select_index.)
     use_heap = method == "hifo" and priority == "none"
+    # Default FIFO consumes oldest-first; advance a forward cursor over spent lots instead of
+    # `del lots[0]` (an O(n) list shift each consumption -> O(n^2) over a fully-consumed ledger).
+    # Spent lots stay in `lots` with sats=0 and are filtered out of open_lots at the end.
+    fifo_cursor = [0] if (method == "fifo" and priority == "none") else None
     internal = internal_txids or set()
     if account_internal_within is not None:
         internal_within = account_internal_within
@@ -369,11 +373,13 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             if tx.kind == TxKind.SELL and tx.fiat_fee:
                 proceeds -= tx.fiat_fee
             _dispose(lots, tx, proceeds, res, realize=True, method=method,
-                     hifo_heap=hifo_heap if use_heap else None, priority=priority)
+                     hifo_heap=hifo_heap if use_heap else None, priority=priority,
+                     fifo_cursor=fifo_cursor)
 
         elif tx.kind == TxKind.TRANSFER_OUT:
             _dispose(lots, tx, Decimal("0"), res, realize=False, method=method,
-                     hifo_heap=hifo_heap if use_heap else None, priority=priority)
+                     hifo_heap=hifo_heap if use_heap else None, priority=priority,
+                     fifo_cursor=fifo_cursor)
         # FEE: ignored for basis
 
     res.open_lots = [lot for lot in lots if lot.sats > 0]
@@ -383,11 +389,11 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
 def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasisResult,
              realize: bool, method: str = "fifo",
              hifo_heap: list[tuple[Decimal, int, Lot]] | None = None,
-             priority: str = "none") -> None:
+             priority: str = "none", fifo_cursor: list[int] | None = None) -> None:
     need = tx.amount_sats
     total = need
     consumed_basis = Decimal("0")
-    while need > 0 and lots:
+    while need > 0:
         idx = None
         if hifo_heap is not None:  # default HIFO fast path (priority == "none"; see compute)
             while hifo_heap and hifo_heap[0][2].sats <= 0:
@@ -395,9 +401,17 @@ def _dispose(lots: list[Lot], tx: Transaction, proceeds: Decimal, res: CostBasis
             if not hifo_heap:
                 break
             lot = hifo_heap[0][2]
-        else:
+        elif fifo_cursor is not None:  # default FIFO fast path: forward cursor, no list shift
+            while fifo_cursor[0] < len(lots) and lots[fifo_cursor[0]].sats <= 0:
+                fifo_cursor[0] += 1
+            if fifo_cursor[0] >= len(lots):
+                break
+            lot = lots[fifo_cursor[0]]
+        elif lots:
             idx = _select_index(lots, method, priority)
             lot = lots[idx]
+        else:
+            break
         take = min(lot.sats, need)
         basis_portion = (lot.basis_usd * Decimal(take) / Decimal(lot.sats)) if lot.sats else Decimal("0")
         consumed_basis += basis_portion
@@ -490,13 +504,15 @@ def compute_wallet(session: Session, account_id: int, wallet_id: int | None) -> 
 
 
 def compute_account_breakdown(
-    session: Session, account_id: int
+    session: Session, account_id: int, internal: set[str] | None = None
 ) -> tuple[CostBasisResult, list[tuple[int | None, CostBasisResult]]]:
     """Account result + per-wallet results in a SINGLE ledger load (avoids the N+1 where the
     detail page recomputed the whole account once per wallet). Per-wallet results share the
-    account-level internal-transfer set so they stay consistent with the account total."""
+    account-level internal-transfer set so they stay consistent with the account total. Callers
+    that also need the internal-transfer set can pass it in to avoid recomputing it."""
     txs = tx_svc.list_transactions(session, account_id)
-    internal = internal_txids(session)
+    if internal is None:
+        internal = internal_txids(session)
     method = _account_method(session, account_id)
     priority = _account_priority(session, account_id)
     account_internal = _account_internal_within(txs, internal)
