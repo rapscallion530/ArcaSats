@@ -5,6 +5,28 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — lossless CSV mapping + transaction detail view
+
+Custodial CSV importers dropped most of what an export offers (Swan's `USD Cost Basis`,
+`Acquisition Date`, address labels, timezone, IP; on-chain destination addresses), surfaced only a
+date (no time), and never showed txid/address. Now every custodian maps cleanly into one schema:
+
+- **Lossless capture.** `transactions.raw_import` stashes the full original CSV row (JSON); every
+  parser sets it, so nothing the export offered is lost. New `transactions.acquired_at` (migration
+  `0006`). `NormalizedTx` gains `address`/`acquired_at`/`cost_basis_usd`/`raw`; parsers map
+  destination addresses + on-chain hashes where present.
+- **Authoritative basis/date.** A BTC deposit that the custodian tags with a `USD Cost Basis` +
+  `Acquisition Date` (e.g. Swan) is now treated as a **transfer-in of coins you already owned** —
+  carrying that basis and back-dating the lot's holding-period origin (engine dates the lot at
+  `acquired_at`) — instead of a fresh buy at deposit time. Stops phantom buys; fixes term.
+- **CSV→wallet linkage.** A CSV withdrawal whose **destination address is one of your own received
+  addresses** (a held `Utxo`) is provably a self-transfer: the reconciler stamps the receive txid
+  and auto-relabels both sides + carries basis/KYC (joining the existing shared-txid auto-carry).
+- **Rich detail view.** Expand any transaction (any source) → exact time (UTC), txid (+explorer),
+  destination address, external id, fee, price + source, KYC origin, carried basis, acquisition
+  date, and the **full original CSV row**; edit the meaningful fields incl. correcting/adding a
+  txid/address to force a wallet link or overriding basis/date (runs the reconciler after). (185 tests.)
+
 ## Unreleased — balance vs holdings consistency
 
 - **[P0] Cost-basis "Holdings" overstated by BTC network fees.** The account balance

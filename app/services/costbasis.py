@@ -22,7 +22,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SATS_PER_BTC, Account, HopAddress, Transaction, TxKind
+from app.models import SATS_PER_BTC, Account, HopAddress, Transaction, TxKind, Utxo
 from app.services import transactions as tx_svc
 
 
@@ -364,7 +364,10 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
                             f"acquisition cost so gains compute correctly."
                         )
                 if tx.amount_sats > 0:
-                    lot = Lot(acquired=tx.timestamp, sats=tx.amount_sats, basis_usd=basis,
+                    # acquired_at (a custodian-provided acquisition date on a transferred-in coin)
+                    # back-dates the lot's holding-period origin; else the event time.
+                    lot = Lot(acquired=getattr(tx, "acquired_at", None) or tx.timestamp,
+                              sats=tx.amount_sats, basis_usd=basis,
                               source=tx.source, kyc_origin=tx.kyc_origin or "")
                     lots.append(lot)
                     if use_heap:
@@ -591,6 +594,27 @@ def reclassify_onchain_transfers(session: Session) -> int:
     not just xpub-to-xpub. A move to a DIFFERENT owner is a gift (left as buy/sell). An outflow
     with no matching same-owner inflow stays a sell. Returns the number of rows relabeled."""
     owner_of = {a.id: _norm_owner(a.owner) for a in session.scalars(select(Account)).all()}
+
+    # Bridge own-address -> txid: a CSV outflow whose DESTINATION address is one of our own
+    # received addresses (a Utxo we hold) is provably a self-transfer to that wallet. Stamp it
+    # with the on-chain txid of that receive so the shared-txid linkage below carries basis + KYC
+    # automatically (the "auto when provably yours" rule). Only fills a MISSING txid; same owner.
+    own_utxo_by_addr: dict[str, Utxo] = {}
+    for u in session.scalars(select(Utxo)):
+        if u.address:
+            own_utxo_by_addr.setdefault(u.address, u)
+    if own_utxo_by_addr:
+        stamped = False
+        for o in session.scalars(select(Transaction).where(
+                Transaction.kind.in_((TxKind.SELL, TxKind.TRANSFER_OUT)),
+                Transaction.txid.is_(None), Transaction.address.is_not(None))):
+            u = own_utxo_by_addr.get(o.address)
+            if u is not None and owner_of.get(o.account_id) == owner_of.get(u.account_id):
+                o.txid = u.txid
+                stamped = True
+        if stamped:
+            session.flush()  # so the by_txid grouping below sees the stamped txids
+
     rows = session.scalars(select(Transaction).where(
         Transaction.txid.is_not(None),
         Transaction.kind.in_((TxKind.BUY, TxKind.SELL, TxKind.TRANSFER_IN, TxKind.TRANSFER_OUT)),

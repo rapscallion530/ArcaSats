@@ -438,14 +438,22 @@ async def tx_edit_form(account_id: int, tx_id: int, request: Request, session: S
 async def tx_edit(account_id: int, tx_id: int, request: Request,
                   kind: str = Form(...), timestamp: str = Form(""), amount_btc: str = Form("0"),
                   fiat_value: str = Form(""), counterparty: str = Form(""), note: str = Form(""),
-                  session: Session = Depends(get_session)):
+                  txid: str = Form(""), address: str = Form(""), acquired_at: str = Form(""),
+                  cost_basis: str = Form(""), session: Session = Depends(get_session)):
     if _tx(session, account_id, tx_id, request) is None:
         return _DENIED_PARTIAL
+    acq = tx_svc.parse_timestamp(acquired_at) if acquired_at.strip() else None
     tx_svc.update_transaction(
         session, tx_id, kind=kind, timestamp=tx_svc.parse_timestamp(timestamp),
         amount_sats=tx_svc.btc_to_sats(amount_btc), fiat_value=tx_svc.parse_usd(fiat_value),
         counterparty=counterparty, note=note,
+        txid=txid, address=address, acquired_at=acq,
+        carried_basis_usd=tx_svc.parse_usd(cost_basis), set_links=True,
     )
+    # Adding/correcting a txid or destination address can link this to one of your wallets — run
+    # the reconciler so a now-provable self-transfer auto-relabels + carries basis/KYC.
+    if txid.strip() or address.strip():
+        costbasis.reconcile_internal_transfers(session)
     return _tx_table(request, session, account_id)
 
 

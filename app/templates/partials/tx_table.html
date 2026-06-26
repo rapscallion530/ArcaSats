@@ -52,12 +52,41 @@
         {% for t in txs %}
         {% if editing == t.id %}
         <tr class="border-b border-line/60 bg-surfaceblue/40">
-          <td colspan="6" class="px-4 py-3">
+          <td colspan="6" class="px-4 py-4">
+            <!-- Read-only detail: every captured element, for ANY source -->
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs mb-4">
+              <div><span class="text-muted">Source</span> <span class="text-ink">{{ t.source }}</span></div>
+              <div><span class="text-muted">Time (UTC)</span> <span class="text-ink tabular-nums">{{ t.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span></div>
+              <div><span class="text-muted">External id</span> <span class="text-ink font-mono break-all">{{ t.external_id or "—" }}</span></div>
+              <div><span class="text-muted">Fee</span> <span class="text-ink">{{ t.fee_sats|btcamt }} <span class="unit">BTC</span></span></div>
+              <div><span class="text-muted">Price/BTC</span> <span class="text-ink">{{ t.price_usd|usd }}</span></div>
+              <div><span class="text-muted">USD source</span> <span class="text-ink">{{ t.fiat_source or "—" }}</span></div>
+              <div><span class="text-muted">KYC origin</span> <span class="text-ink">{{ t.kyc_origin or "—" }}</span></div>
+              <div><span class="text-muted">Carried basis</span> <span class="text-ink">{{ t.carried_basis_usd|usd if t.carried_basis_usd is not none else "—" }}</span></div>
+              <div><span class="text-muted">Acquired</span> <span class="text-ink">{{ t.acquired_at.strftime('%Y-%m-%d') if t.acquired_at else "—" }}</span></div>
+              <div class="sm:col-span-2"><span class="text-muted">Txid</span>
+                {% if t.txid %}<span class="text-ink font-mono break-all">{{ t.txid }}</span>{% if mempool_url|default('') %} <a class="text-accent hover:text-heading" target="_blank" rel="noopener" href="{{ mempool_url }}/tx/{{ t.txid }}">explorer&nbsp;&#8599;</a>{% endif %}{% else %}<span class="text-ink">—</span>{% endif %}
+              </div>
+              <div class="sm:col-span-2"><span class="text-muted">Address</span> <span class="text-ink font-mono break-all">{{ t.address or "—" }}</span></div>
+            </div>
+
+            {% if t.raw_fields %}
+            <details class="mb-4 text-xs">
+              <summary class="text-muted cursor-pointer">Original CSV row ({{ t.raw_fields|length }} fields)</summary>
+              <div class="mt-2 grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
+                {% for k, v in t.raw_fields.items() %}
+                <div class="break-all"><span class="text-muted">{{ k }}</span>: <span class="text-ink">{{ v if v not in (none, "") else "—" }}</span></div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+
+            <!-- Edit the meaningful fields (incl. forcing a wallet link via txid/address) -->
             <form class="grid sm:grid-cols-6 gap-2 items-end"
                   hx-post="/accounts/{{ account.id }}/transactions/{{ t.id }}/edit" hx-target="#tx-table" hx-swap="outerHTML">
-              <label class="text-xs">
-                <span class="text-muted">Date</span>
-                <input name="timestamp" type="date" value="{{ t.timestamp.strftime('%Y-%m-%d') }}"
+              <label class="text-xs sm:col-span-2">
+                <span class="text-muted">Date &amp; time (UTC)</span>
+                <input name="timestamp" type="datetime-local" value="{{ t.timestamp.strftime('%Y-%m-%dT%H:%M') }}"
                        class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
               </label>
               <label class="text-xs">
@@ -76,9 +105,34 @@
                 <input name="fiat_value" value="{{ t.fiat_value if t.fiat_value is not none else '' }}" inputmode="decimal"
                        class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
               </label>
-              <label class="text-xs sm:col-span-2">
+              <label class="text-xs">
                 <span class="text-muted">Counterparty</span>
                 <input name="counterparty" value="{{ t.counterparty }}"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-3">
+                <span class="text-muted">Txid <span class="text-muted/70">(set to link to your wallet)</span></span>
+                <input name="txid" value="{{ t.txid or '' }}" autocomplete="off"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink font-mono text-[11px] focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-3">
+                <span class="text-muted">Destination address</span>
+                <input name="address" value="{{ t.address or '' }}" autocomplete="off"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink font-mono text-[11px] focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-2">
+                <span class="text-muted">Acquisition date (lot origin)</span>
+                <input name="acquired_at" type="date" value="{{ t.acquired_at.strftime('%Y-%m-%d') if t.acquired_at else '' }}"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-2">
+                <span class="text-muted">Carried cost basis (USD)</span>
+                <input name="cost_basis" value="{{ t.carried_basis_usd if t.carried_basis_usd is not none else '' }}" inputmode="decimal"
+                       class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+              </label>
+              <label class="text-xs sm:col-span-2">
+                <span class="text-muted">Note</span>
+                <input name="note" value="{{ t.note }}"
                        class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
               </label>
               <div class="sm:col-span-6 flex items-center gap-3">
@@ -122,7 +176,7 @@
             {% endif %}
             <button class="text-muted hover:text-heading text-xs ml-2"
                     hx-get="/accounts/{{ account.id }}/transactions/{{ t.id }}/edit-form"
-                    hx-target="#tx-table" hx-swap="outerHTML">edit</button>
+                    hx-target="#tx-table" hx-swap="outerHTML">details</button>
             <button class="text-muted hover:text-loss text-xs ml-2"
                     hx-post="/accounts/{{ account.id }}/transactions/{{ t.id }}/delete"
                     hx-target="#tx-table" hx-swap="outerHTML"

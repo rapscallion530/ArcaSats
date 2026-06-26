@@ -12,6 +12,7 @@ import csv
 import datetime as dt
 import hashlib
 import io
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -35,6 +36,14 @@ class NormalizedTx:
     counterparty: str = ""
     external_id: str | None = None
     note: str = ""
+    # Custodian-provided carryover data for a transferred-in coin (e.g. Swan): the original cost
+    # basis (USD) and acquisition date. When present on a TRANSFER_IN, they become the lot's basis
+    # and holding-period origin (see persist_records / costbasis).
+    cost_basis_usd: Decimal | None = None
+    acquired_at: dt.datetime | None = None
+    # The full original (normalized) CSV row — stashed verbatim so nothing the export offered is
+    # lost, surfaced in the transaction detail view.
+    raw: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -209,9 +218,13 @@ def parse_generic(rows: list[dict]) -> list[NormalizedTx]:
             fee_sats=_to_sats(_get(r, "fee_btc", "fee btc")),
             fiat_fee=_usd(_get(r, "fee_usd", "fee", "fees")),
             txid=_get(r, "txid", "tx", "transaction id", "hash") or None,
+            address=_get(r, "address", "destination", "to") or None,
+            cost_basis_usd=_usd(_get(r, "cost_basis", "usd_cost_basis", "cost basis")),
+            acquired_at=_dt(_get(r, "acquired", "acquired_at", "acquisition_date")),
             counterparty=_get(r, "counterparty", "source", "exchange"),
             external_id=_get(r, "external_id", "id", "reference") or None,
             note=_get(r, "note", "notes", "memo"),
+            raw=dict(r),
         ))
     return out
 
@@ -243,6 +256,7 @@ def parse_coinbase(rows: list[dict]) -> list[NormalizedTx]:
             price_usd=_usd(_get(r, "price at transaction", "spot price at transaction", "spot price", "price")),
             counterparty="Coinbase",
             note=_get(r, "notes", "note"),
+            raw=dict(r),
         ))
     return out
 
@@ -286,9 +300,11 @@ def parse_strike(rows: list[dict]) -> list[NormalizedTx]:
             fee_sats=_to_sats(_get(r, "fee btc")),
             fiat_fee=_usd(_get(r, "fee usd", "fee", "fees")),
             price_usd=_usd(_get(r, "exchange rate", "btc price", "price")),
-            txid=_get(r, "transaction hash", "txid", "on-chain txid", "destination") or None,
+            txid=_get(r, "transaction hash", "txid", "on-chain txid") or None,
+            address=_get(r, "destination", "destination address", "address") or None,
             counterparty="Strike",
             external_id=_get(r, "transaction id", "reference", "id") or None,
+            raw=dict(r),
         ))
     return out
 
@@ -317,18 +333,32 @@ def _parse_swan_transactions(rows: list[dict]) -> list[NormalizedTx]:
         asset = _get(r, "asset type", "asset")
         if asset and asset.upper() != "BTC":          # USD funding / fees -> not a BTC event
             continue
-        kind = _map_kind(_CUSTODIAL_KIND, _get(r, "event", "type", "transaction type"))
+        event = _get(r, "event", "type", "transaction type")
+        kind = _map_kind(_CUSTODIAL_KIND, event)
         if not kind:
             continue
+        cost_basis = _usd(_get(r, "usd cost basis", "cost basis"))
+        acq = _dt(_get(r, "acquisition date"))
+        # A BTC inflow Swan tags with an original cost basis + acquisition date is a transfer-IN
+        # of coins you already owned (not a buy at deposit time) — honor the carryover instead of
+        # fabricating a buy. (Deliberate exception to the custodial deposit->buy default.)
+        if kind == TxKind.BUY and event.strip().lower() in ("deposit", "receive", "transfer_in") \
+                and (cost_basis is not None or acq is not None):
+            kind = TxKind.TRANSFER_IN
         out.append(NormalizedTx(
             kind=kind,
             timestamp=_dt(_get(r, "date", "timestamp", "time")),
             amount_sats=_to_sats(_get(r, "unit count", "btc amount", "amount btc", "amount", "btc")),
-            fiat_value=_usd(_get(r, "transaction usd", "total usd", "usd amount", "usd", "value")),
+            # A transfer-in carries basis (below), not a fiat_value at receipt.
+            fiat_value=(None if kind == TxKind.TRANSFER_IN
+                        else _usd(_get(r, "transaction usd", "total usd", "usd amount", "usd", "value"))),
             fiat_fee=_usd(_get(r, "fee usd", "fee")),
             price_usd=_usd(_get(r, "btc price", "price")),
+            cost_basis_usd=cost_basis,
+            acquired_at=acq,
             counterparty="Swan",
             external_id=_get(r, "transaction id", "id", "reference") or None,
+            raw=dict(r),
         ))
     return out
 
@@ -351,8 +381,10 @@ def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
             timestamp=_dt(_get(r, "executed at", "created at", "date", "timestamp")),
             amount_sats=_to_sats(_get(r, "bitcoin amount", "btc amount", "amount", "btc")),
             txid=txid,
+            address=_get(r, "destination", "destination address", "address") or None,
             counterparty="Swan",
             external_id=txid,                          # None -> persist falls back to a stable hash
+            raw=dict(r),
         ))
     return out
 
@@ -371,6 +403,7 @@ def parse_bisq(rows: list[dict]) -> list[NormalizedTx]:
             price_usd=_usd(_get(r, "price")),
             counterparty="Bisq",
             external_id=_get(r, "trade id", "id") or None,
+            raw=dict(r),
         ))
     return out
 
@@ -452,6 +485,10 @@ def persist_records(
             price_usd=n.price_usd, fiat_value=n.fiat_value, fiat_fee=n.fiat_fee,
             fiat_source="actual",  # exchange-reported USD is the real transacted amount
             txid=n.txid, address=n.address, counterparty=n.counterparty,
+            acquired_at=n.acquired_at,
+            # A custodian-provided cost basis on a transfer-in is the carried basis for that lot.
+            carried_basis_usd=(n.cost_basis_usd if n.kind == TxKind.TRANSFER_IN else None),
+            raw_import=(json.dumps(n.raw) if n.raw else None),
             source=source, external_id=ext, note=n.note, commit=False,
         )
         result.imported += 1

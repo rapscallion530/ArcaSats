@@ -69,6 +69,9 @@ def add_transaction(
     external_id: str | None = None,
     note: str = "",
     kyc_origin: str = "",
+    acquired_at: dt.datetime | None = None,
+    carried_basis_usd: Decimal | None = None,
+    raw_import: str | None = None,
     commit: bool = True,
 ) -> Transaction | None:
     """Insert a transaction. Returns None if it's a duplicate (source+external_id).
@@ -104,9 +107,10 @@ def add_transaction(
         amount_sats=amount_sats, fee_sats=fee_sats, price_usd=price_usd,
         fiat_value=fiat_value, fiat_fee=fiat_fee,
         fiat_source=(fiat_source if fiat_value is not None else None),
-        txid=txid, address=address,
+        txid=txid, address=address, acquired_at=acquired_at,
+        carried_basis_usd=carried_basis_usd,
         counterparty=counterparty, source=source, external_id=external_id, note=note,
-        kyc_origin=kyc_origin,
+        kyc_origin=kyc_origin, raw_import=raw_import,
     )
     session.add(tx)
     if not commit:
@@ -123,13 +127,19 @@ def add_transaction(
 def update_transaction(
     session: Session, tx_id: int, *, kind: str, timestamp: dt.datetime, amount_sats: int,
     fiat_value: Decimal | None = None, fee_sats: int | None = None, counterparty: str = "", note: str = "",
-    fiat_source: str | None = "manual",
+    fiat_source: str | None = "manual", txid: str | None = None, address: str | None = None,
+    acquired_at: dt.datetime | None = None, carried_basis_usd: Decimal | None = None,
+    set_links: bool = False,
 ) -> Transaction | None:
-    """Edit a transaction's core fields, including its kind (e.g. sell -> transfer_out).
+    """Edit a transaction's fields, including its kind (e.g. sell -> transfer_out).
 
     A USD value supplied here is treated as authoritative (fiat_source="manual" by default)
     so a later price backfill won't overwrite it. Clearing the value resets provenance,
-    making the tx eligible for re-estimation.
+    making the tx eligible for re-estimation. When `set_links` is True, the on-chain fields
+    (txid/address) and the carryover fields (acquired_at, carried_basis_usd) are also applied —
+    so the detail view can correct/add a txid or address to force a wallet link, or override the
+    cost basis / acquisition date. (The blank default is ignored unless set_links is True, so
+    callers that don't manage those fields don't wipe them.)
     """
     tx = session.get(Transaction, tx_id)
     if tx is None:
@@ -145,6 +155,11 @@ def update_transaction(
     tx.fiat_source = fiat_source if fiat_value is not None else None
     tx.counterparty = counterparty
     tx.note = note
+    if set_links:
+        tx.txid = (txid or "").strip() or None
+        tx.address = (address or "").strip() or None
+        tx.acquired_at = acquired_at
+        tx.carried_basis_usd = carried_basis_usd
     # Keep price_usd consistent with fiat_value/amount.
     if fiat_value is not None and amount_sats:
         tx.price_usd = (fiat_value * SATS_PER_BTC / Decimal(amount_sats)).quantize(Decimal("0.01"))

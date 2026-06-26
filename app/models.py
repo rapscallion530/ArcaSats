@@ -170,10 +170,18 @@ class Transaction(Base):
 
     txid: Mapped[str | None] = mapped_column(String(80), nullable=True)
     address: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Lot holding-period origin override: when set, the cost-basis engine dates this acquisition's
+    # lot at acquired_at instead of `timestamp`. Used to honor a custodian-provided ACQUISITION
+    # DATE on a transferred-in coin (so the holding period reflects when you originally bought it).
+    acquired_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     counterparty: Mapped[str] = mapped_column(String(120), default="")
     source: Mapped[str] = mapped_column(String(60), default="manual")    # manual / csv:coinbase / xpub / api:strike
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     note: Mapped[str] = mapped_column(Text, default="")
+    # Lossless capture: the original CSV row (JSON of normalized column->value) this tx was
+    # imported from, so the detail view can show every field the export offered — even columns we
+    # don't model. Empty for manual/xpub-sourced rows.
+    raw_import: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
     account: Mapped[Account] = relationship(back_populates="transactions")
@@ -202,6 +210,19 @@ class Transaction(Base):
         if self.kind in TxKind.ACQUISITIONS:
             return self.amount_sats
         return -self.amount_sats
+
+    @property
+    def raw_fields(self) -> dict:
+        """The original imported CSV row (parsed) for the detail view — every column the export
+        offered, including ones we don't model. Empty for manual/xpub-sourced transactions."""
+        if not self.raw_import:
+            return {}
+        try:
+            import json
+            data = json.loads(self.raw_import)
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
 
 
 class Utxo(Base):
