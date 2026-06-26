@@ -67,9 +67,9 @@
       <label class="text-sm block">
         <span class="text-muted">USD price source</span>
         <select name="price_source" class="mt-1 w-full sm:w-80 rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
-          <option value="coinbase" {% if cfg.price_source == 'coinbase' %}selected{% endif %}>Coinbase (public, 15-min candles)</option>
-          <option value="bitstamp" {% if cfg.price_source == 'bitstamp' %}selected{% endif %}>Bitstamp (public, 15-min candles)</option>
-          <option value="mempool" {% if cfg.price_source == 'mempool' %}selected{% endif %}>My own mempool node (local, no third party)</option>
+          {% for value, label in price_sources %}
+          <option value="{{ value }}" {% if cfg.price_source == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
         <span class="text-muted text-xs">Where historical USD prices come from. Public sources fetch the 15-minute candle close at each transaction's time, in weekly batches. "My own mempool" uses your node's historical-price API (needs the URL below and price indexing enabled). All prices are spot estimates — enter your actual price paid where you know it; it always takes precedence.</span>
       </label>

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import LLMConnection
-from app.services import llm, node_settings, outbound
+from app.services import llm, node_settings, outbound, pricing
 from app.templating import templates
 
 router = APIRouter()
@@ -20,7 +20,8 @@ async def settings_page(request: Request, session: Session = Depends(get_session
         request, "settings.html",
         {"cfg": (_cfg := node_settings.get_config(session)), "saved": False, "result": None,
          "explorer_is_public": not node_settings.explorer_is_private(_cfg.mempool_url),
-         "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session)},
+         "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session),
+         "price_sources": pricing.price_source_choices()},
     )
 
 
@@ -111,7 +112,8 @@ async def save_settings(
         request, "settings.html",
         {"cfg": cfg, "saved": True, "result": None, "outbound": outbound.recent(session),
          "explorer_is_public": not node_settings.explorer_is_private(cfg.mempool_url),
-         "llm_conns": llm.list_connections(session)},
+         "llm_conns": llm.list_connections(session),
+         "price_sources": pricing.price_source_choices()},
     )
 
 

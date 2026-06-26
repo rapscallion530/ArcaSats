@@ -82,6 +82,46 @@ def test_mempool_price_parse(monkeypatch):
     assert v == Decimal("16500.00")
 
 
+def test_price_source_registry():
+    # The registry is the single source of truth for the valid sources + their metadata.
+    assert pricing.PRICE_SOURCES == tuple(pricing.SOURCES)
+    assert set(pricing.PRICE_SOURCES) == {"coinbase", "bitstamp", "mempool"}
+    assert all(s.label for s in pricing.SOURCES.values())          # every source has a UI label
+    mp = pricing.SOURCES["mempool"]
+    assert mp.is_local and mp.daily_fetcher is None and mp.candle_fetcher is None
+    for name in ("coinbase", "bitstamp"):
+        s = pricing.SOURCES[name]
+        assert not s.is_local and s.host and s.candle_fetcher and s.daily_fetcher
+    assert pricing.price_source_choices() == [(s.name, s.label) for s in pricing.SOURCES.values()]
+
+
+def test_node_settings_validates_price_source_from_registry(session):
+    from app.services import node_settings as ns
+    kw = dict(electrum_host="", electrum_port=50001, use_ssl=False, use_tor=False,
+              tor_host="127.0.0.1", tor_port=9050)
+    for src in pricing.PRICE_SOURCES:                              # each registry source accepted
+        assert ns.save_config(session, price_source=src, **kw).price_source == src
+    # An unknown source is rejected (keeps the prior valid one) — validation derives from the registry.
+    assert ns.save_config(session, price_source="kraken", **kw).price_source == pricing.PRICE_SOURCES[-1]
+
+
+def test_warm_third_party_batches_into_cache(session, monkeypatch):
+    # Guards the batched (single-commit) warm rewrite: a week-warm populates the 15m cache and is
+    # idempotent (a second warm inserts nothing).
+    monkeypatch.setattr(pricing.config, "ENABLE_NETWORK", True)
+    monkeypatch.setattr(pricing.time, "sleep", lambda *a, **k: None)
+    bucket = dt.datetime(2023, 1, 1, 0, 0)
+    payload = [[1672531200, 1, 2, 3, 16500, 9]]   # [time, low, high, open, close, vol]
+    monkeypatch.setattr(pricing.urllib.request, "urlopen", lambda *a, **k: _FakeResp(payload))
+    pricing._warm_third_party(session, pricing.SOURCES["coinbase"], {bucket})
+    assert pricing.get_cached_hour(session, bucket) == Decimal("16500.00")
+    pricing._warm_third_party(session, pricing.SOURCES["coinbase"], {bucket})  # idempotent
+    from sqlalchemy import func, select as _select
+    from app.models import HourlyPrice
+    n = session.scalar(_select(func.count()).select_from(HourlyPrice).where(HourlyPrice.hour_start == bucket))
+    assert n == 1
+
+
 def test_get_price_no_network_returns_none(session):
     # network disabled in tests -> no fallback, returns None for uncached date
     assert pricing.get_price(session, dt.date(2030, 5, 5), allow_network=True) is None

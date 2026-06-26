@@ -21,6 +21,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -41,12 +42,9 @@ _LOCKED_SOURCES = {"actual", "manual"}
 
 # The FMV used for a transaction is the close of the 15-minute candle covering its time.
 _GRANULARITY_SECONDS = 900  # 15-minute candles
-THIRD_PARTY_SOURCES = ("coinbase", "bitstamp")
-PRICE_SOURCES = ("coinbase", "bitstamp", "mempool")
-# Hours of candles per request, kept under each API's max-candles cap at 15m
-# (Coinbase 300 -> 75h; Bitstamp 1000 -> 250h). Conservative values leave headroom.
-_MAX_HOURS_PER_REQUEST = {"coinbase": 72, "bitstamp": 240}
-_SOURCE_HOST = {"coinbase": "api.exchange.coinbase.com", "bitstamp": "www.bitstamp.net"}
+# Per-source metadata (host, candle/daily fetchers, week-warm chunk size) lives on the SOURCES
+# registry near the bottom of this module — the single source of truth, also driving the Settings
+# dropdown and config validation. PRICE_SOURCES is derived from it there.
 
 
 # --- daily-close cache (PricePoint) + CSV import -----------------------------
@@ -114,7 +112,7 @@ def upsert_hour(session: Session, bucket_start: dt.datetime, price: Decimal, sou
 
 
 # --- daily close (per-date fallback when a 15m candle is missing) ------------
-def fetch_online(d: dt.date, timeout: float = 12.0) -> Decimal | None:
+def _fetch_coinbase_daily(d: dt.date, timeout: float = 12.0) -> Decimal | None:
     """Coinbase Exchange daily close (keyless). BTT_ENABLE_NETWORK only. Public data, no PII."""
     if not config.ENABLE_NETWORK:
         return None
@@ -148,15 +146,19 @@ def _fetch_bitstamp_daily(d: dt.date, timeout: float = 12.0) -> Decimal | None:
 
 def get_price(session: Session, d: dt.date, allow_network: bool = True, source: str = "coinbase") -> Decimal | None:
     """Daily-close fallback for a date, cached in PricePoint. Uses the chosen third-party
-    source so a privacy-conscious choice isn't undone by querying a different exchange."""
+    source so a privacy-conscious choice isn't undone by querying a different exchange. A local
+    source (mempool) has no daily fallback and returns None."""
     cached = get_cached(session, d)
     if cached is not None:
         return cached
     if not (allow_network and config.ENABLE_NETWORK):
         return None
+    src = SOURCES.get(source)
+    if src is None or src.is_local or src.daily_fetcher is None:
+        return None
     from app.services import outbound
-    outbound.record(_SOURCE_HOST.get(source, source), "historical BTC/USD price fetch", "1 day (fallback)")
-    p = _fetch_bitstamp_daily(d) if source == "bitstamp" else fetch_online(d)
+    outbound.record(src.host, "historical BTC/USD price fetch", "1 day (fallback)")
+    p = src.daily_fetcher(d)
     if p is not None:
         upsert(session, d, p, source=source)
     return p
@@ -205,7 +207,38 @@ def _fetch_bitstamp_candles(start: dt.datetime, end: dt.datetime, timeout: float
         return []
 
 
-_CANDLE_FETCHERS = {"coinbase": _fetch_coinbase_candles, "bitstamp": _fetch_bitstamp_candles}
+# --- price-source registry (single source of truth) --------------------------
+@dataclass(frozen=True)
+class PriceSource:
+    """One FMV source. Third-party sources (coinbase/bitstamp) fetch 15m candles in weekly windows
+    plus a daily-close fallback; a local source (mempool) is queried per bucket for the nearest
+    stored price and has no daily fallback. All per-source knowledge lives here, so adding/removing
+    a source is a single registry entry — and the same registry drives config validation
+    (node_settings) and the Settings dropdown."""
+    name: str
+    label: str                                  # Settings dropdown label
+    is_local: bool                              # local node: per-bucket nearest, no daily fallback
+    host: str = ""                              # third-party API host (for the Outbound Log)
+    max_hours: int = 0                          # week-warm request chunk (under the API candle cap)
+    candle_fetcher: Callable | None = None      # (start, end) -> [(bucket_start, close)]
+    daily_fetcher: Callable | None = None       # (date) -> Decimal | None
+
+
+SOURCES: dict[str, PriceSource] = {s.name: s for s in (
+    # Chunk sizes stay under each API's max-candles cap at 15m (Coinbase 300 -> 75h; Bitstamp
+    # 1000 -> 250h); conservative values leave headroom.
+    PriceSource("coinbase", "Coinbase (public, 15-min candles)", False,
+                "api.exchange.coinbase.com", 72, _fetch_coinbase_candles, _fetch_coinbase_daily),
+    PriceSource("bitstamp", "Bitstamp (public, 15-min candles)", False,
+                "www.bitstamp.net", 240, _fetch_bitstamp_candles, _fetch_bitstamp_daily),
+    PriceSource("mempool", "My own mempool node (local, no third party)", True),
+)}
+PRICE_SOURCES = tuple(SOURCES)
+
+
+def price_source_choices() -> list[tuple[str, str]]:
+    """(name, label) pairs for the Settings dropdown — derived from the registry."""
+    return [(s.name, s.label) for s in SOURCES.values()]
 
 
 def _week_start(ts: dt.datetime) -> dt.datetime:
@@ -213,29 +246,39 @@ def _week_start(ts: dt.datetime) -> dt.datetime:
     return dt.datetime(d.year, d.month, d.day)
 
 
-def warm_candle_weeks(session: Session, source: str, buckets_needed: set[dt.datetime]) -> None:
-    """For each fixed Mon–Sun WEEK containing a needed-but-uncached 15m bucket, download the
-    whole week's 15m candles from the chosen third-party source. The request reveals only the
-    week of activity, not the exact transaction time."""
-    if not config.ENABLE_NETWORK or source not in THIRD_PARTY_SOURCES:
+def _warm_third_party(session: Session, src: PriceSource, buckets_needed: set[dt.datetime]) -> None:
+    """For each fixed Mon–Sun WEEK containing a needed-but-uncached 15m bucket, download the whole
+    week's 15m candles (the request reveals only the week of activity, not the exact tx time).
+    Collected candles are written in a SINGLE bulk commit — one existence check over the range,
+    insert only missing buckets — instead of a SELECT + commit per candle."""
+    if not config.ENABLE_NETWORK:
         return
     weeks = sorted({_week_start(b) for b in buckets_needed if get_cached_hour(session, b) is None})
     if not weeks:
         return
     from app.services import outbound
-    outbound.record(_SOURCE_HOST[source], "historical BTC/USD price fetch", f"{len(weeks)} week(s)")
-    fetcher = _CANDLE_FETCHERS[source]
-    step = dt.timedelta(hours=_MAX_HOURS_PER_REQUEST[source])
+    outbound.record(src.host, "historical BTC/USD price fetch", f"{len(weeks)} week(s)")
+    step = dt.timedelta(hours=src.max_hours)
+    collected: dict[dt.datetime, Decimal] = {}
     for wk in weeks:
         end = wk + dt.timedelta(days=7)
         cur = wk
         while cur < end:
             chunk_end = min(cur + step, end)
-            for b, close in fetcher(cur, chunk_end):
-                if get_cached_hour(session, b) is None:
-                    upsert_hour(session, b, close, source=source)
+            for b, close in src.candle_fetcher(cur, chunk_end):
+                collected.setdefault(b, close)
             cur = chunk_end
             time.sleep(0.35)  # be gentle between calls
+    if not collected:
+        return
+    # One range query for existing buckets (avoids the SQLite 999-variable IN limit), then insert
+    # only the missing ones in a single commit — same net cache as the old per-candle skip.
+    existing = set(session.scalars(select(HourlyPrice.hour_start).where(
+        HourlyPrice.hour_start >= min(collected), HourlyPrice.hour_start <= max(collected))))
+    for b, close in collected.items():
+        if b not in existing:
+            session.add(HourlyPrice(hour_start=b, price_usd=close, source=src.name))
+    session.commit()
 
 
 # --- local mempool source ----------------------------------------------------
@@ -258,9 +301,10 @@ def _fetch_mempool_price(mempool_url: str, ts: dt.datetime, timeout: float = 12.
         return None
 
 
-def warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.datetime]) -> None:
-    """Query the user's mempool for each needed-but-uncached bucket. Per-bucket queries are
-    fine here: it's the user's OWN node, so there's no third-party fingerprinting concern."""
+def _warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.datetime]) -> None:
+    """Query the user's mempool for each needed-but-uncached bucket. Per-bucket QUERIES are fine
+    here: it's the user's OWN node, so there's no third-party fingerprinting concern. The DB
+    writes are batched into a single commit at the end."""
     if not config.ENABLE_NETWORK or not mempool_url:
         return
     todo = sorted(b for b in buckets_needed if get_cached_hour(session, b) is None)
@@ -270,11 +314,24 @@ def warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.date
     from app.services import outbound
     outbound.record(urlparse(mempool_url).hostname or mempool_url, "BTC/USD price (own mempool)",
                     f"{len(todo)} lookup(s)")
-    for b in todo:
+    added = False
+    for b in todo:  # `todo` is already the uncached set, so a plain insert won't duplicate
         p = _fetch_mempool_price(mempool_url, b)
         if p is not None:
-            upsert_hour(session, b, p, source="mempool")
+            session.add(HourlyPrice(hour_start=b, price_usd=p, source="mempool"))
+            added = True
         time.sleep(0.05)
+    if added:
+        session.commit()
+
+
+def _warm(session: Session, src: PriceSource, buckets_needed: set[dt.datetime], cfg) -> None:
+    """Warm the 15m candle cache for the chosen source (single dispatch point — callers don't
+    branch on source name)."""
+    if src.is_local:
+        _warm_mempool(session, cfg.mempool_url, buckets_needed)
+    else:
+        _warm_third_party(session, src, buckets_needed)
 
 
 def price_at(session: Session, ts: dt.datetime, source: str = "coinbase",
@@ -284,8 +341,9 @@ def price_at(session: Session, ts: dt.datetime, source: str = "coinbase",
     cached = get_cached_hour(session, _bucket_start(ts))
     if cached is not None:
         return cached, "candle"
-    if source == "mempool":
-        return None, None  # warm already asked the user's node for the nearest price; no fallback
+    src = SOURCES.get(source)
+    if src is None or src.is_local:
+        return None, None  # local: warm already asked the user's node for the nearest; no fallback
     daily = get_price(session, ts.date(), allow_network=allow_network, source=source)
     if daily is not None:
         return daily, "daily"
@@ -318,7 +376,8 @@ def backfill_prices(session: Session, account_id: int) -> PriceBackfillResult:
     from app.services import node_settings
     res = PriceBackfillResult(network_used=config.ENABLE_NETWORK)
     source = _price_source(session)
-    mempool_url = node_settings.get_config(session).mempool_url
+    cfg = node_settings.get_config(session)
+    mempool_url = cfg.mempool_url
     txs = session.scalars(select(Transaction).where(Transaction.account_id == account_id)).all()
 
     def needs(tx):
@@ -333,10 +392,9 @@ def backfill_prices(session: Session, account_id: int) -> PriceBackfillResult:
     # Warm the candle cache from the chosen source (third-party: whole WEEKS; mempool: local).
     if config.ENABLE_NETWORK and work:
         needed = {_bucket_start(tx.timestamp) for tx in work if not _locked(tx)}
-        if source == "mempool":
-            warm_mempool(session, mempool_url, needed)
-        else:
-            warm_candle_weeks(session, source, needed)
+        src = SOURCES.get(source)
+        if src is not None:
+            _warm(session, src, needed, cfg)
 
     for tx in work:
         before = (tx.price_usd, tx.fiat_value, tx.fiat_source)

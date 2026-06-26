@@ -70,7 +70,8 @@ def save_config(session: Session, *, electrum_host: str, electrum_port: int, use
     cfg.tor_port = tor_port
     if mempool_url is not None:
         cfg.mempool_url = mempool_url.strip().rstrip("/")
-    if price_source in ("coinbase", "bitstamp", "mempool"):
+    from app.services import pricing  # lazy: avoid import cycle; registry is the source of truth
+    if price_source in pricing.PRICE_SOURCES:
         cfg.price_source = price_source
     session.commit()
     session.refresh(cfg)

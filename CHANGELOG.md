@@ -5,6 +5,23 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — price-source abstraction
+
+Per-source pricing behavior was scattered across five parallel module dicts/tuples
+(`THIRD_PARTY_SOURCES`, `PRICE_SOURCES`, `_MAX_HOURS_PER_REQUEST`, `_SOURCE_HOST`,
+`_CANDLE_FETCHERS`) + `if source == …` branches, and the valid-source list was duplicated in three
+places (pricing, `node_settings`, `settings.html`). Collapsed into one **`PriceSource` registry**
+(`pricing.SOURCES`) holding each source's label/host/fetchers/warm-strategy; `PRICE_SOURCES`,
+config validation (`node_settings.save_config`), and the Settings dropdown all derive from it, so
+a source is now a single registry entry. `get_price` / `price_at` / `backfill_prices` dispatch
+through it with no source-name branches.
+- **[P1] Batched candle-cache warming.** Third-party week-warming collected candles and wrote them
+  with a SELECT + commit **per candle**; it now does one range existence check + a **single
+  commit** per warm (mempool warming likewise commits once). Behavior/cache contents unchanged.
+
+No change to FMV math, the 15m-candle-then-daily fallback, the weekly-window privacy model, or
+locked-value rules. (167 tests.)
+
 ## Unreleased — address-based fuzzy-hop detection (amount+date matching removed)
 
 The reconciliation inbox matched candidate self-transfers on amount + date (±0.002 BTC, ≤7 days)
