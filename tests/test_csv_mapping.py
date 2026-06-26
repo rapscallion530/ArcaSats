@@ -69,6 +69,20 @@ def test_csv_withdrawal_to_own_address_auto_links(session):
     assert cold_in.carried_basis_usd == Decimal("20000.00")        # basis carried Swan -> Cold
 
 
+def test_swan_withdrawal_completed_status_is_imported(session):
+    # Regression: a real Swan withdrawals export marks executed rows "Completed", not "settled".
+    # A strict ==\"settled\" filter dropped them all (inflating the balance). Keep executed,
+    # drop only canceled.
+    a = acc.create_account(session, name="SwanW")
+    csv = ("Created At,Timezone,Transaction ID,Executed At,Canceled At,Status,Bitcoin Amount,Automatic,IP Address\n"
+           "2025-01-15 12:00:00+00,UTC,abc123,2025-01-15 13:00:00+00,,Completed,0.00500000,t,10.0.0.1\n"
+           "2025-02-20 12:00:00+00,UTC,,,2025-02-22 00:00:00+00,primetrust-canceled,0.01000000,t,10.0.0.1\n")
+    csv_import.import_csv(session, account_id=a.id, source="swan", text=csv)
+    txs = session.scalars(select(Transaction).where(Transaction.account_id == a.id)).all()
+    assert len(txs) == 1                                   # Completed kept; canceled dropped
+    assert txs[0].kind == TxKind.SELL and txs[0].txid == "abc123"
+
+
 def _aid(name: str) -> int:
     with SessionLocal() as s:
         return s.scalar(select(Account.id).where(Account.name == name))

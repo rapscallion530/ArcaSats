@@ -372,7 +372,10 @@ def _parse_swan_withdrawals(rows: list[dict]) -> list[NormalizedTx]:
     out = []
     for r in rows:
         status = _get(r, "status").lower()
-        if status and status != "settled":            # only settled withdrawals actually executed
+        # Keep withdrawals that actually executed, regardless of the exact word the export uses
+        # ("settled", "Completed", "complete", …); drop only ones that never moved coins. A strict
+        # `== "settled"` check silently dropped real "Completed" withdrawals (inflating the balance).
+        if "cancel" in status or status in ("pending", "failed", "reversed", "expired", "rejected"):
             continue
         txid = _get(r, "transaction id", "txid", "on-chain txid") or None
         out.append(NormalizedTx(

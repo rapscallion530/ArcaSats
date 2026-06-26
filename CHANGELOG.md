@@ -5,6 +5,15 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — Swan withdrawals dropped by a too-strict status filter
+
+- **[P0] Swan withdrawals silently dropped → inflated balance.** `_parse_swan_withdrawals` kept
+  only rows whose Status was exactly `"settled"`, but a real Swan export marks executed
+  withdrawals **`"Completed"`** — so every withdrawal was discarded and the account balance read
+  high (buys kept, withdrawals gone). Now it keeps any executed status and drops only canceled/
+  pending/failed ones (`"cancel" in status` or pending/failed/reversed/expired/rejected). Verified
+  on a 100-row dummy export: Swan now nets to 0 BTC as expected. Regression test added.
+
 ## Unreleased — lossless CSV mapping + transaction detail view
 
 Custodial CSV importers dropped most of what an export offers (Swan's `USD Cost Basis`,
