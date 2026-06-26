@@ -58,11 +58,9 @@ class _FakeResp:
 
 def test_price_source_setting_roundtrip(session):
     from app.services import node_settings as ns
-    kw = dict(electrum_host="", electrum_port=50001, use_ssl=False, use_tor=False,
-              tor_host="127.0.0.1", tor_port=9050)
-    assert ns.save_config(session, price_source="bitstamp", **kw).price_source == "bitstamp"
+    assert ns.save_mempool(session, mempool_url="", price_source="bitstamp").price_source == "bitstamp"
     # An invalid value is ignored (keeps the prior valid one).
-    assert ns.save_config(session, price_source="garbage", **kw).price_source == "bitstamp"
+    assert ns.save_mempool(session, mempool_url="", price_source="garbage").price_source == "bitstamp"
     assert pricing._price_source(session) == "bitstamp"
 
 
@@ -97,12 +95,10 @@ def test_price_source_registry():
 
 def test_node_settings_validates_price_source_from_registry(session):
     from app.services import node_settings as ns
-    kw = dict(electrum_host="", electrum_port=50001, use_ssl=False, use_tor=False,
-              tor_host="127.0.0.1", tor_port=9050)
     for src in pricing.PRICE_SOURCES:                              # each registry source accepted
-        assert ns.save_config(session, price_source=src, **kw).price_source == src
+        assert ns.save_mempool(session, mempool_url="", price_source=src).price_source == src
     # An unknown source is rejected (keeps the prior valid one) — validation derives from the registry.
-    assert ns.save_config(session, price_source="kraken", **kw).price_source == pricing.PRICE_SOURCES[-1]
+    assert ns.save_mempool(session, mempool_url="", price_source="kraken").price_source == pricing.PRICE_SOURCES[-1]
 
 
 def test_warm_third_party_batches_into_cache(session, monkeypatch):

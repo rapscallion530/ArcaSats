@@ -1,0 +1,7 @@
+<div id="mempool-status">
+  {% if mempool_result is not none %}
+  <div class="rounded-[8px] border px-4 py-3 text-sm {{ 'border-gain text-gain' if mempool_result.ok else 'border-loss text-loss' }}">
+    {{ mempool_result.message }}{% if mempool_result.ok and mempool_result.latency_ms is not none %} ({{ mempool_result.latency_ms }} ms){% endif %}
+  </div>
+  {% endif %}
+</div>

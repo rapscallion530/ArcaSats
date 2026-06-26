@@ -14,15 +14,19 @@ from app.templating import templates
 router = APIRouter()
 
 
+def _page_ctx(session: Session, **extra):
+    cfg = node_settings.get_config(session)
+    ctx = {"cfg": cfg, "saved": False, "result": None, "mempool_result": None,
+           "explorer_is_public": not node_settings.explorer_is_private(cfg.mempool_url),
+           "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session),
+           "price_sources": pricing.price_source_choices()}
+    ctx.update(extra)
+    return ctx
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, session: Session = Depends(get_session)):
-    return templates.TemplateResponse(
-        request, "settings.html",
-        {"cfg": (_cfg := node_settings.get_config(session)), "saved": False, "result": None,
-         "explorer_is_public": not node_settings.explorer_is_private(_cfg.mempool_url),
-         "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session),
-         "price_sources": pricing.price_source_choices()},
-    )
+    return templates.TemplateResponse(request, "settings.html", _page_ctx(session))
 
 
 # --- Local AI connections ----------------------------------------------------
@@ -91,7 +95,7 @@ async def llm_models(request: Request, provider: str = Form("ollama"), base_url:
 
 
 @router.post("/settings", response_class=HTMLResponse)
-async def save_settings(
+async def save_node_settings(
     request: Request,
     electrum_host: str = Form(""),
     electrum_port: int = Form(50001),
@@ -99,22 +103,27 @@ async def save_settings(
     use_tor: bool = Form(False),
     tor_host: str = Form("127.0.0.1"),
     tor_port: int = Form(9050),
+    session: Session = Depends(get_session),
+):
+    node_settings.save_node(
+        session, electrum_host=electrum_host, electrum_port=electrum_port, use_ssl=use_ssl,
+        use_tor=use_tor, tor_host=tor_host, tor_port=tor_port,
+    )
+    return templates.TemplateResponse(request, "settings.html", _page_ctx(session, saved=True))
+
+
+@router.post("/settings/mempool", response_class=HTMLResponse)
+async def save_mempool_settings(
+    request: Request,
     mempool_url: str = Form(""),
+    mempool_use_tor: bool = Form(False),
     price_source: str = Form("coinbase"),
     session: Session = Depends(get_session),
 ):
-    cfg = node_settings.save_config(
-        session, electrum_host=electrum_host, electrum_port=electrum_port, use_ssl=use_ssl,
-        use_tor=use_tor, tor_host=tor_host, tor_port=tor_port, mempool_url=mempool_url,
-        price_source=price_source,
+    node_settings.save_mempool(
+        session, mempool_url=mempool_url, mempool_use_tor=mempool_use_tor, price_source=price_source,
     )
-    return templates.TemplateResponse(
-        request, "settings.html",
-        {"cfg": cfg, "saved": True, "result": None, "outbound": outbound.recent(session),
-         "explorer_is_public": not node_settings.explorer_is_private(cfg.mempool_url),
-         "llm_conns": llm.list_connections(session),
-         "price_sources": pricing.price_source_choices()},
-    )
+    return templates.TemplateResponse(request, "settings.html", _page_ctx(session, saved=True))
 
 
 @router.post("/settings/test", response_class=HTMLResponse)
@@ -135,6 +144,27 @@ async def test_settings(
         use_tor=use_tor, tor_host=tor_host, tor_port=tor_port,
     )
     return templates.TemplateResponse(request, "partials/node_status.html", {"result": result})
+
+
+@router.post("/settings/mempool/test", response_class=HTMLResponse)
+async def test_mempool_settings(
+    request: Request,
+    mempool_url: str = Form(""),
+    mempool_use_tor: bool = Form(False),
+    session: Session = Depends(get_session),
+):
+    # The Tor SOCKS proxy is saved with the node; reuse it for the mempool test.
+    cfg = node_settings.get_config(session)
+    if mempool_url.strip():
+        from urllib.parse import urlparse
+        host = urlparse(mempool_url.strip()).hostname or mempool_url.strip()
+        outbound.record(host, "mempool connection test")
+    result = node_settings.test_mempool_params(
+        mempool_url=mempool_url, mempool_use_tor=mempool_use_tor,
+        tor_host=cfg.tor_host, tor_port=cfg.tor_port,
+    )
+    return templates.TemplateResponse(request, "partials/mempool_status.html",
+                                      {"mempool_result": result})
 
 
 @router.post("/settings/outbound/clear")

@@ -58,9 +58,10 @@ def get_config(session: Session) -> NodeConfig:
     return cfg
 
 
-def save_config(session: Session, *, electrum_host: str, electrum_port: int, use_ssl: bool,
-                use_tor: bool, tor_host: str, tor_port: int, mempool_url: str | None = None,
-                price_source: str | None = None) -> NodeConfig:
+def save_node(session: Session, *, electrum_host: str, electrum_port: int, use_ssl: bool,
+              use_tor: bool, tor_host: str, tor_port: int) -> NodeConfig:
+    """Save the Electrum NODE connection (+ the shared Tor SOCKS proxy). Leaves the mempool /
+    price-source settings untouched so the two can be configured independently."""
     cfg = get_config(session)
     cfg.electrum_host = electrum_host.strip()
     cfg.electrum_port = electrum_port
@@ -68,8 +69,18 @@ def save_config(session: Session, *, electrum_host: str, electrum_port: int, use
     cfg.use_tor = use_tor
     cfg.tor_host = (tor_host or "127.0.0.1").strip()
     cfg.tor_port = tor_port
-    if mempool_url is not None:
-        cfg.mempool_url = mempool_url.strip().rstrip("/")
+    session.commit()
+    session.refresh(cfg)
+    return cfg
+
+
+def save_mempool(session: Session, *, mempool_url: str, mempool_use_tor: bool = False,
+                 price_source: str | None = None) -> NodeConfig:
+    """Save the MEMPOOL connection (block-explorer base + price API) and the USD price source.
+    Independent of the node; the Tor toggle reuses the SOCKS proxy saved with the node."""
+    cfg = get_config(session)
+    cfg.mempool_url = (mempool_url or "").strip().rstrip("/")
+    cfg.mempool_use_tor = bool(mempool_use_tor)
     from app.services import pricing  # lazy: avoid import cycle; registry is the source of truth
     if price_source in pricing.PRICE_SOURCES:
         cfg.price_source = price_source
@@ -124,7 +135,7 @@ def test_connection(session: Session, timeout: float = 12.0) -> TestResult:
 
 def test_params(*, electrum_host: str, electrum_port: int, use_ssl: bool, use_tor: bool,
                 tor_host: str, tor_port: int, timeout: float = 12.0) -> TestResult:
-    """Test explicit values (lets the UI test before saving), Sparrow-style."""
+    """Test explicit NODE values (lets the UI test before saving), Sparrow-style."""
     host = (electrum_host or "").strip()
     if not host:
         return TestResult(False, "Enter a server address first.")
@@ -135,3 +146,31 @@ def test_params(*, electrum_host: str, electrum_port: int, use_ssl: bool, use_to
         proxy_port=tor_port if via_tor else None,
     )
     return _test_client(client)
+
+
+def test_mempool_params(*, mempool_url: str, mempool_use_tor: bool = False,
+                        tor_host: str = "127.0.0.1", tor_port: int = 9050,
+                        timeout: float = 12.0) -> TestResult:
+    """Test the MEMPOOL connection by probing its historical-price API — the app's actual mempool
+    use. Routes over the Tor SOCKS proxy for a .onion host (or when opted in). Reachable-with-no-
+    price is reported as OK with guidance (the instance just needs price indexing enabled)."""
+    url = (mempool_url or "").strip().rstrip("/")
+    if not url:
+        return TestResult(False, "Enter your mempool URL first.")
+    from app.services import http_fetch
+    host = urlparse(url).hostname or ""
+    via = http_fetch.via_tor(host, mempool_use_tor)
+    probe = f"{url}/api/v1/historical-price?currency=USD&timestamp={int(time.time()) - 86400}"
+    start = time.monotonic()
+    try:
+        body = http_fetch.get_json(
+            probe, proxy_host=(tor_host or "127.0.0.1") if via else None,
+            proxy_port=tor_port if via else None, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        return TestResult(False, f"Connection failed: {exc}")
+    latency = int((time.monotonic() - start) * 1000)
+    prices = (body or {}).get("prices") or []
+    if prices and prices[0].get("USD"):
+        return TestResult(True, "Connected — price data available", latency_ms=latency)
+    return TestResult(True, "Connected, but no price data returned — enable price indexing on your mempool.",
+                      latency_ms=latency)

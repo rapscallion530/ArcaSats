@@ -14,7 +14,7 @@ def _aid(name: str) -> int:
 def test_get_config_seeds_and_saves(session):
     cfg = node_settings.get_config(session)
     assert cfg.id == 1
-    cfg2 = node_settings.save_config(
+    cfg2 = node_settings.save_node(
         session, electrum_host="electrum.example.com", electrum_port=50002,
         use_ssl=True, use_tor=False, tor_host="127.0.0.1", tor_port=9050)
     assert cfg2.electrum_host == "electrum.example.com"
@@ -23,13 +23,13 @@ def test_get_config_seeds_and_saves(session):
 
 def test_build_client_clearnet_vs_onion(session):
     # clearnet, no tor
-    node_settings.save_config(session, electrum_host="10.0.0.5", electrum_port=50001,
+    node_settings.save_node(session, electrum_host="10.0.0.5", electrum_port=50001,
                               use_ssl=False, use_tor=False, tor_host="127.0.0.1", tor_port=9050)
     c = node_settings.build_client(session)
     assert c is not None and c.proxy_host is None
 
     # .onion -> tor auto-on, ssl off
-    node_settings.save_config(session, electrum_host="abc.onion", electrum_port=50001,
+    node_settings.save_node(session, electrum_host="abc.onion", electrum_port=50001,
                               use_ssl=True, use_tor=False, tor_host="127.0.0.1", tor_port=9150)
     c2 = node_settings.build_client(session)
     assert c2.proxy_host == "127.0.0.1" and c2.proxy_port == 9150 and c2.use_ssl is False
@@ -53,7 +53,7 @@ def test_explorer_is_private_classifies_hosts():
 
 
 def test_build_client_none_when_unset(session):
-    node_settings.save_config(session, electrum_host="", electrum_port=50001,
+    node_settings.save_node(session, electrum_host="", electrum_port=50001,
                               use_ssl=False, use_tor=False, tor_host="127.0.0.1", tor_port=9050)
     assert node_settings.build_client(session) is None
 
@@ -71,6 +71,61 @@ def test_settings_routes(client):
     # test endpoint returns a status partial (unreachable -> failure text)
     r = client.post("/settings/test", data={"electrum_host": "127.0.0.1", "electrum_port": "1"})
     assert r.status_code == 200 and "node-status" in r.text
+
+
+def test_save_node_and_mempool_are_independent(session):
+    # The whole point of the feature: each form saves only its own fields.
+    ns = node_settings
+    ns.save_node(session, electrum_host="node.local", electrum_port=50001, use_ssl=False,
+                 use_tor=False, tor_host="127.0.0.1", tor_port=9050)
+    ns.save_mempool(session, mempool_url="http://mp.local:3006/", mempool_use_tor=True,
+                    price_source="mempool")
+    cfg = ns.get_config(session)
+    assert cfg.electrum_host == "node.local"
+    assert cfg.mempool_url == "http://mp.local:3006" and cfg.mempool_use_tor is True
+    assert cfg.price_source == "mempool"
+    # Re-saving the node must NOT clobber the mempool settings (and vice versa).
+    ns.save_node(session, electrum_host="node2.local", electrum_port=50001, use_ssl=False,
+                 use_tor=False, tor_host="127.0.0.1", tor_port=9050)
+    cfg = ns.get_config(session)
+    assert cfg.electrum_host == "node2.local"
+    assert cfg.mempool_url == "http://mp.local:3006" and cfg.mempool_use_tor is True
+
+
+def test_test_mempool_params_reports_states(session, monkeypatch):
+    from app.services import http_fetch
+    monkeypatch.setattr(http_fetch, "get_json", lambda *a, **k: {"prices": [{"USD": 90000}]})
+    r = node_settings.test_mempool_params(mempool_url="http://m.local:3006")
+    assert r.ok and "price data available" in r.message
+    monkeypatch.setattr(http_fetch, "get_json", lambda *a, **k: {"prices": []})
+    r = node_settings.test_mempool_params(mempool_url="http://m.local:3006")
+    assert r.ok and "no price data" in r.message
+    def boom(*a, **k):
+        raise OSError("connection refused")
+    monkeypatch.setattr(http_fetch, "get_json", boom)
+    r = node_settings.test_mempool_params(mempool_url="http://m.local:3006")
+    assert not r.ok and "failed" in r.message.lower()
+
+
+def test_test_mempool_params_routes_onion_via_tor(monkeypatch):
+    from app.services import http_fetch
+    seen = {}
+    def fake(url, *, proxy_host=None, proxy_port=None, timeout=12.0):
+        seen["proxy"] = proxy_host
+        return {"prices": [{"USD": 1}]}
+    monkeypatch.setattr(http_fetch, "get_json", fake)
+    node_settings.test_mempool_params(mempool_url="http://abcd.onion:3006", tor_host="127.0.0.1", tor_port=9050)
+    assert seen["proxy"] == "127.0.0.1"   # .onion -> routed through the SOCKS proxy
+    node_settings.test_mempool_params(mempool_url="http://m.local:3006", tor_host="127.0.0.1", tor_port=9050)
+    assert seen["proxy"] is None          # clearnet -> direct
+
+
+def test_mempool_settings_routes(client):
+    client.post("/settings/mempool", data={"mempool_url": "http://my.local:3006", "price_source": "mempool"})
+    assert "my.local:3006" in client.get("/settings").text
+    # unreachable host -> failure text, but the endpoint still renders the status partial (200)
+    r = client.post("/settings/mempool/test", data={"mempool_url": "http://127.0.0.1:1"})
+    assert r.status_code == 200 and "mempool-status" in r.text
 
 
 def test_node_status_widget(client):
@@ -166,3 +221,22 @@ def test_account_edit_duplicate_name_rejected(client):
     aid = _aid("DupAlpha")
     r = client.post(f"/accounts/{aid}/edit", data={"name": "DupBeta"})
     assert "already exists" in r.text
+
+
+def test_migration_0005_adds_mempool_use_tor(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    url = f"sqlite:///{(tmp_path / 'm.sqlite').as_posix()}"
+    monkeypatch.setattr("app.config.DATABASE_URL", url)
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(repo_root / "alembic"))
+    command.upgrade(cfg, "head")
+    eng = create_engine(url)
+    cols = {c["name"] for c in inspect(eng).get_columns("node_config")}
+    eng.dispose()
+    assert "mempool_use_tor" in cols

@@ -5,7 +5,7 @@
 <div class="max-w-[760px] mx-auto px-5 py-10 space-y-6">
   <div>
     <h1 class="text-2xl text-heading">Settings</h1>
-    <p class="text-muted text-sm mt-1">Connect to your Bitcoin node's Electrum server (electrs/Fulcrum) for xpub sync.</p>
+    <p class="text-muted text-sm mt-1">Connect to your Bitcoin node (Electrum, for xpub sync) and your mempool — configured and tested separately.</p>
   </div>
 
   {% if saved %}
@@ -64,27 +64,6 @@
         </div>
       </details>
 
-      <label class="text-sm block">
-        <span class="text-muted">USD price source</span>
-        <select name="price_source" class="mt-1 w-full sm:w-80 rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
-          {% for value, label in price_sources %}
-          <option value="{{ value }}" {% if cfg.price_source == value %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <span class="text-muted text-xs">Where historical USD prices come from. Public sources fetch the 15-minute candle close at each transaction's time, in weekly batches. "My own mempool" uses your node's historical-price API (needs the URL below and price indexing enabled). All prices are spot estimates — enter your actual price paid where you know it; it always takes precedence.</span>
-      </label>
-
-      <label class="text-sm block">
-        <span class="text-muted">Block explorer URL (optional)</span>
-        <input name="mempool_url" value="{{ cfg.mempool_url }}" autocomplete="off"
-               placeholder="http://your-mempool.local:3006  or  https://abcd…xyz.onion"
-               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
-        <span class="text-muted text-xs">A mempool.space-compatible explorer. For privacy, use your <strong>own</strong> instance — your node's mempool on StartOS/Umbrel, a LAN instance, or a <code>.onion</code>. Adds an "explorer&nbsp;↗" link on each on-chain transaction. ArcaSats itself sends nothing; <em>your browser</em> opens the link, so whatever host you point this at sees the txid you click.</span>
-        {% if explorer_is_public %}
-        <span class="mt-2 block rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-xs text-warn">⚠ This explorer host isn't local or <code>.onion</code> — clicking an "explorer&nbsp;↗" link reveals the transaction id (and your IP) to a third-party service. Prefer your own node's mempool or a <code>.onion</code> to keep it private.</span>
-        {% endif %}
-      </label>
-
       <div class="flex items-center gap-3">
         <button type="submit"
                 class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
@@ -100,6 +79,61 @@
     </form>
 
     <div class="mt-4">{% include "partials/node_status.html" %}</div>
+  </section>
+
+  <!-- Mempool (block explorer + optional price source) -->
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <h2 class="text-xl text-heading mb-1">Mempool connection</h2>
+    <p class="text-muted text-sm mb-5">
+      Your own <strong>mempool.space-compatible</strong> instance — configured and tested separately
+      from the node. Used for the optional <em>mempool</em> price source (the app fetches its
+      historical-price API) and the "explorer&nbsp;↗" links on on-chain transactions (opened by
+      <em>your browser</em> — the app sends nothing).
+    </p>
+
+    <form method="post" action="/settings/mempool" class="space-y-5">
+      <label class="text-sm block">
+        <span class="text-muted">Mempool URL</span>
+        <input name="mempool_url" value="{{ cfg.mempool_url }}" autocomplete="off"
+               placeholder="http://your-mempool.local:3006  or  http://abcd…xyz.onion"
+               class="mt-1 w-full rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink font-mono text-xs focus:outline-none focus:border-accent">
+        <span class="text-muted text-xs">For privacy use your <strong>own</strong> instance — your node's mempool on StartOS/Umbrel, a LAN host, or a <code>.onion</code>.</span>
+        {% if explorer_is_public %}
+        <span class="mt-2 block rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-xs text-warn">⚠ This host isn't local or <code>.onion</code> — clicking an "explorer&nbsp;↗" link reveals the transaction id (and your IP) to a third party. Prefer your own node's mempool or a <code>.onion</code>.</span>
+        {% endif %}
+      </label>
+
+      <label class="inline-flex items-center gap-2 text-sm">
+        <input type="checkbox" name="mempool_use_tor" value="on" {% if cfg.mempool_use_tor %}checked{% endif %}>
+        <span class="text-ink">Connect via Tor</span>
+        <span class="text-muted text-xs">(auto for .onion; uses the SOCKS proxy set under Node)</span>
+      </label>
+
+      <label class="text-sm block">
+        <span class="text-muted">USD price source</span>
+        <select name="price_source" class="mt-1 w-full sm:w-80 rounded-[8px] border border-line bg-inputbg px-3 py-2 text-ink focus:outline-none focus:border-accent">
+          {% for value, label in price_sources %}
+          <option value="{{ value }}" {% if cfg.price_source == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <span class="text-muted text-xs">Where historical USD prices come from. Public sources fetch the 15-minute candle close at each transaction's time, in weekly batches. "My own mempool" uses the URL above (needs price indexing enabled). All prices are spot estimates — your entered price always wins.</span>
+      </label>
+
+      <div class="flex items-center gap-3">
+        <button type="submit"
+                class="px-4 py-2 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">
+          Save
+        </button>
+        <button type="button"
+                hx-post="/settings/mempool/test" hx-include="closest form" hx-target="#mempool-status" hx-swap="innerHTML"
+                class="px-4 py-2 rounded-[8px] bg-surface border border-line text-heading text-sm font-medium hover:border-muted">
+          Test mempool
+        </button>
+        <span class="htmx-indicator text-sm text-muted">testing… (Tor can take ~10s)</span>
+      </div>
+    </form>
+
+    <div class="mt-4">{% include "partials/mempool_status.html" %}</div>
   </section>
 
   <!-- Local AI (optional) -->

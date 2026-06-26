@@ -335,6 +335,10 @@ class NodeConfig(Base):
     # Where historical USD prices come from: "coinbase" / "bitstamp" (public exchange OHLC,
     # weekly 15m candles) or "mempool" (your own node's historical-price API — fully local).
     price_source: Mapped[str] = mapped_column(String(20), default="coinbase")
+    # Reach the mempool's price API over Tor (via the SOCKS proxy in tor_host/tor_port) — needed
+    # for a .onion mempool. Independent of the Electrum node's use_tor; explorer links are
+    # browser-side and unaffected by this.
+    mempool_use_tor: Mapped[bool] = mapped_column(default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(default=lambda: dt.datetime.now(dt.UTC).replace(tzinfo=None))
 
 

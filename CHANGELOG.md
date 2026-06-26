@@ -5,6 +5,24 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — separate node & mempool connections
+
+Settings lumped the Electrum **node** and the **mempool** into one form with one "Test
+connection" button that only ever tested the node; the mempool was never exercised, and the app's
+mempool fetch (the `mempool` price source) used plain HTTP with no Tor — so a `.onion` mempool
+couldn't be reached by the app at all.
+
+- Split Settings into independent **Node connection** and **Mempool connection** sections, each
+  with its own Save and Test. `node_settings.save_config` → `save_node` + `save_mempool` so one
+  form never clobbers the other's fields.
+- New **Test mempool** probes the historical-price API (the app's actual mempool use) and reports
+  reachable-with-price / reachable-but-no-price (enable indexing) / unreachable.
+- **Mempool over Tor:** new `mempool_use_tor` (migration `0005`) routes the price-API fetch + the
+  test through the Tor SOCKS proxy for a `.onion` host (or opt-in), reusing the Electrum client's
+  `_socks5_connect` via a new dependency-free `http_fetch.get_json` (clearnet via urllib; Tor via
+  raw socket + SOCKS5, TLS only for https, chunked-aware). Explorer links remain browser-side.
+- No change to Electrum sync, FMV math, or the weekly-window price privacy model. +9 tests (177).
+
 ## Unreleased — efficiency + cleanup pass
 
 - **[P1] Batched import commits.** `transactions.add_transaction` gained `commit=False`;

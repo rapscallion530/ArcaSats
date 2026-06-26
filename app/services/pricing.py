@@ -33,8 +33,8 @@ from app.models import SATS_PER_BTC, HourlyPrice, PricePoint, Transaction, TxKin
 
 # Failures we expect from a public price endpoint (network down, rate-limited, schema drift).
 # We swallow these into "no price available"; anything else propagates so real bugs surface.
-_FETCH_ERRORS = (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
-                 ValueError, IndexError, KeyError, TypeError)
+_FETCH_ERRORS = (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError,
+                 ValueError, IndexError, KeyError, TypeError)  # OSError covers Tor socket failures
 
 _VALUE_KINDS = {TxKind.BUY, TxKind.SELL, TxKind.INCOME, TxKind.SPEND}
 # fiat_value provenance we must NOT overwrite during a price backfill.
@@ -287,14 +287,21 @@ def _warm_third_party(session: Session, src: PriceSource, buckets_needed: set[dt
 
 
 # --- local mempool source ----------------------------------------------------
-def _fetch_mempool_price(mempool_url: str, ts: dt.datetime, timeout: float = 12.0) -> Decimal | None:
-    """Nearest stored BTC/USD price from the user's own mempool instance. Local, no third party."""
+def _fetch_mempool_price(mempool_url: str, ts: dt.datetime, timeout: float = 12.0,
+                         *, proxy_host: str | None = None, proxy_port: int | None = None) -> Decimal | None:
+    """Nearest stored BTC/USD price from the user's own mempool instance. Local, no third party.
+    Routes over the Tor SOCKS proxy when proxy_host is set (for a .onion mempool); clearnet keeps
+    the urllib path so it stays simple/monkeypatchable."""
     if not mempool_url:
         return None
     unix = int(ts.replace(tzinfo=dt.UTC).timestamp())
     url = f"{mempool_url.rstrip('/')}/api/v1/historical-price?currency=USD&timestamp={unix}"
     try:
-        body = _get_json(url, timeout)
+        if proxy_host:
+            from app.services import http_fetch
+            body = http_fetch.get_json(url, proxy_host=proxy_host, proxy_port=proxy_port, timeout=timeout)
+        else:
+            body = _get_json(url, timeout)
         prices = body.get("prices") or []
         if not prices:
             return None
@@ -304,10 +311,11 @@ def _fetch_mempool_price(mempool_url: str, ts: dt.datetime, timeout: float = 12.
         return None
 
 
-def _warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.datetime]) -> None:
+def _warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.datetime],
+                  *, proxy_host: str | None = None, proxy_port: int | None = None) -> None:
     """Query the user's mempool for each needed-but-uncached bucket. Per-bucket QUERIES are fine
     here: it's the user's OWN node, so there's no third-party fingerprinting concern. The DB
-    writes are batched into a single commit at the end."""
+    writes are batched into a single commit at the end. Routes over Tor when proxy_host is set."""
     if not config.ENABLE_NETWORK or not mempool_url:
         return
     todo = sorted(b for b in buckets_needed if get_cached_hour(session, b) is None)
@@ -315,11 +323,12 @@ def _warm_mempool(session: Session, mempool_url: str, buckets_needed: set[dt.dat
         return
     from urllib.parse import urlparse
     from app.services import outbound
-    outbound.record(urlparse(mempool_url).hostname or mempool_url, "BTC/USD price (own mempool)",
+    outbound.record(urlparse(mempool_url).hostname or mempool_url,
+                    "BTC/USD price (own mempool%s)" % (" over Tor" if proxy_host else ""),
                     f"{len(todo)} lookup(s)")
     added = False
     for b in todo:  # `todo` is already the uncached set, so a plain insert won't duplicate
-        p = _fetch_mempool_price(mempool_url, b)
+        p = _fetch_mempool_price(mempool_url, b, proxy_host=proxy_host, proxy_port=proxy_port)
         if p is not None:
             session.add(HourlyPrice(hour_start=b, price_usd=p, source="mempool"))
             added = True
@@ -332,7 +341,13 @@ def _warm(session: Session, src: PriceSource, buckets_needed: set[dt.datetime], 
     """Warm the 15m candle cache for the chosen source (single dispatch point — callers don't
     branch on source name)."""
     if src.is_local:
-        _warm_mempool(session, cfg.mempool_url, buckets_needed)
+        from urllib.parse import urlparse
+        from app.services import http_fetch
+        host = urlparse(cfg.mempool_url or "").hostname or ""
+        via = http_fetch.via_tor(host, getattr(cfg, "mempool_use_tor", False))
+        _warm_mempool(session, cfg.mempool_url, buckets_needed,
+                      proxy_host=cfg.tor_host if via else None,
+                      proxy_port=cfg.tor_port if via else None)
     else:
         _warm_third_party(session, src, buckets_needed)
 
