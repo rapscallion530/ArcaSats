@@ -15,12 +15,16 @@ Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2
   — the core `requirements.txt`, the Docker image, and the headless `uvicorn app.main:app` path
   (server / StartOS) are untouched, and a non-loopback `BTT_BIND_HOST` keeps the classic headless
   flow. Tests stub the GUI + server to cover the start/stop lifecycle and browser fallback.
-- **[P0 follow-up] "Terminal flashes then nothing."** If `webview.start()` returned immediately
-  *without raising* (no desktop session / WebView2 can't draw), the launcher hit its `finally`,
-  stopped the server, and exited silently. It now treats an errored **or implausibly short**
-  window session as "window unavailable" and degrades to a browser tab against the still-running
-  server, and writes `data/desktop.log` (start / window-closed / fallback / fatal) so a
-  console-less `pythonw` launch is diagnosable.
+- **[P0 follow-up] "Terminal flashes then nothing"** had two causes, both fixed:
+  - *The real killer:* under `pythonw.exe` there's no console, so `sys.stdout`/`sys.stderr` are
+    `None` — and uvicorn's logging setup calls `sys.stdout.isatty()`, raising `ValueError: Unable
+    to configure formatter 'default'` **before the server or window ever started**. `desktop.py`
+    now points the missing streams at the log file and starts uvicorn with `log_config=None`, so
+    it never touches the console logger.
+  - *Safety net:* if `webview.start()` still returns immediately *without raising* (no desktop /
+    WebView2 can't draw), the launcher no longer silently exits — it opens a browser tab against
+    the still-running server. Everything is logged to `data/desktop.log` (start / window-closed /
+    fallback / fatal) so a console-less `pythonw` launch is diagnosable.
 
 ## Unreleased — "List models" gave no visible feedback
 

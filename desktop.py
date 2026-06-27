@@ -15,11 +15,29 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import threading
 import time
 
 HOST = "127.0.0.1"
 TITLE = "ArcaSats"
+
+
+def _ensure_streams() -> None:
+    """Under pythonw.exe (no console) sys.stdout/sys.stderr are None, which crashes uvicorn's
+    logging setup (its formatter calls sys.stdout.isatty()) and any stray print(). Point the
+    missing streams at the desktop log file so nothing blows up before the window appears."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        from app.config import DATA_DIR
+        stream = open(os.path.join(DATA_DIR, "desktop.log"), "a", encoding="utf-8", buffering=1)
+    except Exception:  # noqa: BLE001
+        stream = open(os.devnull, "w")  # noqa: SIM115
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
 
 
 def _free_port(preferred: int = 8000) -> int:
@@ -42,7 +60,9 @@ def _start_server(port: int):
 
     from app.main import app
 
-    config = uvicorn.Config(app, host=HOST, port=port, log_level="warning")
+    # log_config=None: don't install uvicorn's console logging (its colored formatter probes
+    # sys.stdout.isatty(), which is fatal under pythonw); we run windowed, not in a terminal.
+    config = uvicorn.Config(app, host=HOST, port=port, log_level="warning", log_config=None)
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name="arcasats-uvicorn", daemon=True)
     thread.start()
@@ -71,6 +91,7 @@ def main(run_window=_open_native_window, min_session_s: float = 3.0) -> int:
     was implausibly short, we degrade to opening a browser tab against the still-running server.
     Everything is logged to data/desktop.log so a windowed (console-less) launch is diagnosable.
     """
+    _ensure_streams()
     port = _free_port(int(os.environ.get("BTT_PORT", "8000")))
     server, thread = _start_server(port)
     url = f"http://{HOST}:{port}"
