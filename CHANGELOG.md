@@ -15,6 +15,12 @@ Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2
   — the core `requirements.txt`, the Docker image, and the headless `uvicorn app.main:app` path
   (server / StartOS) are untouched, and a non-loopback `BTT_BIND_HOST` keeps the classic headless
   flow. Tests stub the GUI + server to cover the start/stop lifecycle and browser fallback.
+- **[P0 follow-up] "Terminal flashes then nothing."** If `webview.start()` returned immediately
+  *without raising* (no desktop session / WebView2 can't draw), the launcher hit its `finally`,
+  stopped the server, and exited silently. It now treats an errored **or implausibly short**
+  window session as "window unavailable" and degrades to a browser tab against the still-running
+  server, and writes `data/desktop.log` (start / window-closed / fallback / fatal) so a
+  console-less `pythonw` launch is diagnosable.
 
 ## Unreleased — "List models" gave no visible feedback
 

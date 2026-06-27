@@ -61,25 +61,46 @@ def _open_native_window(url: str) -> None:
     webview.start()
 
 
-def main(run_window=_open_native_window) -> int:
-    """Launch the server + native window. `run_window` is injected for tests; it must block until
-    the user closes the window, after which we stop the server and return."""
+def main(run_window=_open_native_window, min_session_s: float = 3.0) -> int:
+    """Launch the server + native window. `run_window` is injected for tests; normally it blocks
+    until the user closes the window, after which we stop the server and exit.
+
+    Robustness: some systems can't display a WebView2 window (missing runtime, no desktop session,
+    etc.), in which case `webview.start()` returns almost immediately — or raises. Either way we
+    must NOT silently exit (that's the 'nothing happens' bug). If the window errors or its session
+    was implausibly short, we degrade to opening a browser tab against the still-running server.
+    Everything is logged to data/desktop.log so a windowed (console-less) launch is diagnosable.
+    """
     port = _free_port(int(os.environ.get("BTT_PORT", "8000")))
     server, thread = _start_server(port)
     url = f"http://{HOST}:{port}"
+    _log(f"server started at {url} (started={server.started}); opening native window")
+
+    error = None
+    began = time.monotonic()
     try:
         run_window(url)
-    except Exception as exc:  # noqa: BLE001 — windowed mode has no console; degrade to a browser tab
-        _log(f"native window failed ({exc!r}); opening a browser tab instead")
-        import webbrowser
-        webbrowser.open(url)
-        try:
-            thread.join()
-        except KeyboardInterrupt:
-            pass
-    finally:
+    except Exception as exc:  # noqa: BLE001
+        error = exc
+    elapsed = time.monotonic() - began
+
+    if error is None and elapsed >= min_session_s:
+        _log(f"window closed after {elapsed:.1f}s; shutting down")
         server.should_exit = True
         thread.join(timeout=5)
+        return 0
+
+    # Window unavailable (raised, or returned too fast to have really shown). Don't leave a blank
+    # screen: open a browser tab against the running server and keep serving.
+    _log(f"native window unavailable (elapsed={elapsed:.1f}s, error={error!r}); "
+         f"opening a browser tab at {url} and keeping the server running")
+    import webbrowser
+    webbrowser.open(url)
+    try:
+        thread.join()
+    except KeyboardInterrupt:
+        pass
+    server.should_exit = True
     return 0
 
 
@@ -93,4 +114,10 @@ def _log(message: str) -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _log("launcher starting")
+    try:
+        rc = main()
+    except Exception as exc:  # noqa: BLE001 — no console under pythonw; leave a trace before dying
+        _log(f"FATAL: {exc!r}")
+        raise
+    raise SystemExit(rc)

@@ -24,14 +24,16 @@ class _FakeThread:
         pass
 
 
-def test_main_stops_server_after_window_closes(monkeypatch):
+def test_main_stops_server_after_a_real_window_session(monkeypatch):
+    # A genuine window session (>= min_session_s) ends -> stop the server, no browser fallback.
     fake = _FakeServer()
     monkeypatch.setattr(desktop, "_start_server", lambda port: (fake, _FakeThread()))
+    monkeypatch.setattr(webbrowser, "open", lambda u: (_ for _ in ()).throw(AssertionError("no browser")))
     seen = {}
-    rc = desktop.main(run_window=lambda url: seen.update(url=url))   # returns == user closed window
+    rc = desktop.main(run_window=lambda url: seen.update(url=url), min_session_s=0.0)
     assert rc == 0
     assert seen["url"].startswith("http://127.0.0.1:")
-    assert fake.should_exit is True                                  # server told to stop
+    assert fake.should_exit is True
 
 
 def test_main_falls_back_to_browser_when_window_fails(monkeypatch):
@@ -47,3 +49,15 @@ def test_main_falls_back_to_browser_when_window_fails(monkeypatch):
     assert rc == 0
     assert opened["u"].startswith("http://127.0.0.1:")              # degraded to a browser tab
     assert fake.should_exit is True
+
+
+def test_main_falls_back_when_window_returns_immediately(monkeypatch):
+    # The actual reported bug: webview.start() returns at once WITHOUT raising (window never shows).
+    # Must not silently exit — open a browser tab instead.
+    fake = _FakeServer()
+    monkeypatch.setattr(desktop, "_start_server", lambda port: (fake, _FakeThread()))
+    opened = {}
+    monkeypatch.setattr(webbrowser, "open", lambda u: opened.update(u=u))
+    rc = desktop.main(run_window=lambda url: None, min_session_s=10.0)   # "instant" return
+    assert rc == 0
+    assert opened["u"].startswith("http://127.0.0.1:")
