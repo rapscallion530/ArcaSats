@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Shared Jinja2 templates instance + formatting filters."""
 from decimal import Decimal
 from pathlib import Path

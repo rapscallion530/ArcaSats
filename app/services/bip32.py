@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Pure-Python BIP32 watch-only derivation (no native deps).
 
 Derives receive/change addresses from an account-level extended PUBLIC key

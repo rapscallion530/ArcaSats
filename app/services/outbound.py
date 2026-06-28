@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Outbound Data Log — records intentional network actions locally for transparency.
 
 Only host + purpose (+ a short non-sensitive detail) are stored — never addresses,

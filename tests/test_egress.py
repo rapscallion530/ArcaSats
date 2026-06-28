@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Local-only egress guard: with the network off (the default; conftest sets
 BTT_ENABLE_NETWORK=0) and no node/LLM configured, an ordinary accounting workflow must record
 ZERO outbound actions. Regression test for the privacy promise."""

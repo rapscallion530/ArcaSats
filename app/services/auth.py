@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Authentication: password hashing + an optional single app-wide lock (stdlib only).
 
 ArcaSats is single-user and local-only — there are no user accounts. When BTT_APP_PASSWORD is

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Wire xpub wallets to a configured Electrum server and sync on demand.
 
 Network only happens here, when the user triggers a sync and a host is configured.

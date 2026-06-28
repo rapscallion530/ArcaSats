@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Bitcoin address -> scriptPubKey -> Electrum scripthash.
 
 Self-contained address decoders (bech32/bech32m + base58check) so we can compute

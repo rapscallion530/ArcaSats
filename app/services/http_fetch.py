@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Minimal HTTP(S) GET -> JSON, optionally via a Tor SOCKS5 proxy (for `.onion` hosts).
 
 Clearnet uses urllib; the Tor path reuses `electrum._socks5_connect` over a raw socket so we add

@@ -10,7 +10,7 @@ A **local-only** US Bitcoin tax & accounting tool, intended to run as a self-hos
 
 ## License & auditing
 
-ArcaSats is free, open-source software released under the **[MIT License](LICENSE)** — you may use, modify, distribute, and sell it, including commercially; just keep the copyright notice. Copyright © 2026 The ArcaSats Authors.
+ArcaSats is free, open-source software released under the **[MIT License](LICENSE)** — you may use, modify, distribute, and sell it, including commercially; just keep the copyright notice. Copyright © 2026 Rapscallion.
 
 This is privacy- and money-sensitive software, so **independent auditing is explicitly welcomed.** Start with [`SECURITY.md`](SECURITY.md) for the trust model and how to report issues, and [`docs/code-review.md`](docs/code-review.md) for an architecture + audit guide. This tool produces tax figures for your review — **it is not tax advice**; verify against current IRS guidance and consult a professional before filing.
 

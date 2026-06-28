@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Desktop launcher — run ArcaSats in a native OS window (pywebview / Windows WebView2) instead
 of a browser tab, with no console. Closing the window stops the server and exits the process, so
 there's no Ctrl+C in a terminal.

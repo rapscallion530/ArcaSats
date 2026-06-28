@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Local LLM connections + a thin chat client.
 
 Supports two endpoint styles, both commonly served locally:

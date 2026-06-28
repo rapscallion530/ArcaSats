@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Accounts: list, create, detail, delete + manual transaction entry.
 
 Single-user app: handlers resolve account/wallet/tx targets by id (tx routes also require the

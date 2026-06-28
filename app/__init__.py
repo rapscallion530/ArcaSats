@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 #
 # ArcaSats — a local-only US Bitcoin tax & accounting application.
 # Free and open-source under the MIT License; see the LICENSE file at the repository root.

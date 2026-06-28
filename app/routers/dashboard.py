@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Dashboard: portfolio overview across accounts."""
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse

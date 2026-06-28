@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Minimal Electrum protocol client (electrs / Fulcrum).
 
 Speaks the line-delimited JSON-RPC Electrum protocol. Used to look up address

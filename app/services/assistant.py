@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Read-only "Ask your data" assistant.
 
 Builds a compact, structured snapshot from the DETERMINISTIC cost-basis engine and asks a

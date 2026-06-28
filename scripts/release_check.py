@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Release-hygiene gate for the public repo.
 
 Fails (exit 1) if any of these are true, so it can run in CI before a tag/publish:

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Auth routes: the optional single-password lock (login/logout). No user accounts.
 
 When BTT_APP_PASSWORD is unset the app is open and these routes just bounce to the dashboard.

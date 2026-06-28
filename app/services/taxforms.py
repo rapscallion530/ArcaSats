@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """US tax forms from cost-basis results.
 
 Form 8949 (per disposal) split into Part I (short-term) / Part II (long-term),

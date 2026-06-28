@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """bitcoin-tax-tracker — local-only Bitcoin tax & accounting.
 
 FastAPI + HTMX + Tailwind. Single-container, SQLite-backed, no data leaves the box.

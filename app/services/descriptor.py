@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Multisig output-descriptor support (watch-only).
 
 Parses a wallet output descriptor as exported by Sparrow / Unchained, e.g.

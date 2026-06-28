@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Alembic environment. Targets the app's SQLAlchemy metadata and the same SQLite URL the app
 uses (from app.config), with batch mode on so SQLite ALTERs (drop column, change constraints)
 work via table rebuilds."""

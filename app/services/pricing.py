@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Historical BTC/USD prices.
 
 A user-chosen price SOURCE (Settings → price source) determines where FMV comes from:

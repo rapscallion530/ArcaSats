@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """FIFO cost-basis engine (per account / per wallet).
 
 Implements per-account FIFO consistent with IRS Rev. Proc. 2024-28 (per-wallet

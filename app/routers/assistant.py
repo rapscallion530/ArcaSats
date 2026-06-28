@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Assistant: ask read-only questions about your own data via a local LLM."""
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse

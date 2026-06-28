@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Electrum node connection settings (Sparrow-style: server + port + Tor toggle).
 
 The DB NodeConfig (singleton) is the source of truth, seeded from env on first use

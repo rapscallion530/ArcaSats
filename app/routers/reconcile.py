@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 The ArcaSats Authors
+# Copyright (c) 2026 Rapscallion
 """Reconciliation inbox: review suggested same-owner self-transfers that share no txid.
 
 Suggestions are never auto-applied — the user confirms (relabel both sides to transfers +
