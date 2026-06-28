@@ -23,6 +23,7 @@ app/
     electrum.py      Electrum JSON-RPC client (Tor SOCKS5)                  <- egress
     pricing.py       BTC/USD price cache + Coinbase/Bitstamp fetch          <- egress
     llm.py           local-LLM client + loopback/LAN privacy gate          <- egress
+    tor_service.py   bundled Tor: verified download + managed daemon        <- egress (desktop)
     outbound.py      Outbound Data Log (host+purpose only)                 <- egress ledger
     auth.py          PBKDF2 + signed session tokens
     accounts.py      account/wallet ops
@@ -36,7 +37,9 @@ code keeps this.
 
 **Trust boundaries (where data could leave the machine):** `electrum.py`, `pricing.py`,
 `llm.py` — all funnel through `outbound.py` for logging. Network is OFF unless
-`BTT_ENABLE_NETWORK=1` (price feed) or the user configures a node/LLM. See `SECURITY.md`.
+`BTT_ENABLE_NETWORK=1` (price feed) or the user configures a node/LLM. `tor_service.py` (desktop
+only) additionally downloads the official Tor binary over HTTPS (sha256-verified) and runs it as a
+loopback-only client; it carries no user/portfolio data. See `SECURITY.md`.
 
 **Auth model:** single-user — no user accounts. Open by default; set `BTT_APP_PASSWORD` to gate
 the whole instance behind one password (an HMAC-signed unlock cookie). The gate lives in the
@@ -45,7 +48,7 @@ the whole instance behind one password (an HMAC-signed unlock cookie). The gate 
 ## Running the checks
 
 ```
-pytest -q                          # 191 tests; crypto vectors, cost-basis, KYC lots, importers,
+pytest -q                          # 200 tests; crypto vectors, cost-basis, KYC lots, importers,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)

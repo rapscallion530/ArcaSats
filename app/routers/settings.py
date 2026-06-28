@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.models import LLMConnection
-from app.services import llm, node_settings, outbound, pricing
+from app.services import llm, node_settings, outbound, pricing, tor_service
 from app.templating import templates
 
 router = APIRouter()
@@ -19,7 +19,7 @@ def _page_ctx(session: Session, **extra):
     ctx = {"cfg": cfg, "saved": False, "result": None, "mempool_result": None,
            "explorer_is_public": not node_settings.explorer_is_private(cfg.mempool_url),
            "outbound": outbound.recent(session), "llm_conns": llm.list_connections(session),
-           "price_sources": pricing.price_source_choices()}
+           "price_sources": pricing.price_source_choices(), "tor": tor_service.status()}
     ctx.update(extra)
     return ctx
 
@@ -107,6 +107,20 @@ async def llm_models(request: Request, provider: str = Form("ollama"), base_url:
     # The message swaps into the visible status span (the button's target); the datalist is
     # refreshed out-of-band so the Model input's autocomplete picks up the new options.
     return HTMLResponse(f'{msg}<datalist id="{dl_id}" hx-swap-oob="true">{opts}</datalist>')
+
+
+# --- bundled Tor -------------------------------------------------------------
+@router.post("/settings/tor/check", response_class=HTMLResponse)
+async def tor_check(request: Request, session: Session = Depends(get_session)):
+    return templates.TemplateResponse(request, "partials/tor_status.html",
+                                      {"tor": tor_service.status(), "tor_update": tor_service.check_update()})
+
+
+@router.post("/settings/tor/update", response_class=HTMLResponse)
+async def tor_update(request: Request, session: Session = Depends(get_session)):
+    result = tor_service.update()
+    return templates.TemplateResponse(request, "partials/tor_status.html",
+                                      {"tor": tor_service.status(), "tor_update": result})
 
 
 @router.post("/settings", response_class=HTMLResponse)

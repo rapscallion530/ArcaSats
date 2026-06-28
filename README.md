@@ -6,7 +6,7 @@
 
 A **local-only** US Bitcoin tax & accounting tool, intended to run as a self-hosted service on **StartOS** (Start9) alongside an existing Bitcoin full node / Lightning / mempool / Electrum-server stack. Goal: replace a bitcoin.tax subscription with a private, self-hosted alternative.
 
-> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **191 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
+> Status: **Pre-1.0 — feature-complete core, hardening before public release.** Implemented: accounts/manual entry, CSV import (Coinbase/Strike/Swan/Bisq/generic), xpub on-chain sync with buy/sell classification (incl. **multisig output-descriptor import**), FIFO/LIFO/HIFO **per-account** cost basis, **multi-source 15-minute USD pricing** (Coinbase/Bitstamp/your own mempool), block-explorer links, Form 8949/Schedule D, an optional **local** LLM "Ask your data" assistant, dark mode, and StartOS/Umbrel packaging scaffolds. Built from scratch (see decision below). **Direct exchange-API sync was removed in favor of CSV import** (keeps keys/traffic off third-party APIs). **200 tests passing.** A pre-release audit ([`docs/code-review.md`](docs/code-review.md)) tracks remaining work — treat current output as alpha and verify before filing.
 
 ## License & auditing
 
@@ -76,6 +76,12 @@ For a normal install (no developer setup needed):
 4. **Add your data** — in the app: **Settings** to point at your own node / pick a price source,
    then **Accounts → import a CSV** (Coinbase/Strike/Swan/Bisq) or **add an xpub** to sync on-chain
    activity. Enter your actual prices where you know them (they always win over estimates).
+
+**`.onion` works out of the box.** The desktop app runs its **own** Tor in the background (the
+official Tor binary, downloaded + checksum-verified on first use, cached under `data\tor\`), so a
+`.onion` node/mempool connects with **no Tor Browser and no separate Tor service**. Keep it patched
+from **Settings → Tor (built in) → Update**, or `python scripts/update_tor.py`. (On a server/StartOS,
+ArcaSats uses the system Tor instead.)
 
 **Your data stays on your machine.** It’s written to a `data\` folder next to the app
 (`data\btt.sqlite` + `secret.key`) — **never** committed or uploaded. The only outbound traffic is

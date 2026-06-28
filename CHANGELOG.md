@@ -5,6 +5,26 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — bundled, self-managing Tor (turnkey .onion)
+
+- **Reach a `.onion` node with no second app.** Previously you had to keep **Tor Browser** open so
+  ArcaSats could use its SOCKS proxy. The desktop app now runs its **own** Tor instance: new
+  `app/services/tor_service.py` resolves a `tor` binary (`BTT_TOR_BINARY` → a cached download →
+  one on PATH), **downloading the official Tor Expert Bundle over HTTPS and verifying its sha256**
+  the first time, then launches Tor on an **ephemeral, loopback-only `SocksPort`** with an isolated
+  `DataDirectory` and stops it on exit. `.onion`/Tor traffic routes through `active_proxy()` via a
+  new `node_settings.tor_proxy_or()` (used by `build_client` + the node/mempool tests); the manual
+  Tor host/port becomes the fallback.
+- **CVE hygiene / updates.** The installed version + hash are recorded in `data/tor/manifest.json`;
+  **Settings → Tor (built in)** shows status/version with **Check / Update** buttons, the desktop
+  launch flags a newer version on startup, and `scripts/update_tor.py` updates from the CLI (each
+  update re-downloads + re-verifies).
+- **Gating:** managed Tor runs only on the desktop launch (`BTT_MANAGED_TOR`, set by `desktop.py`).
+  The headless `uvicorn app.main:app` path (server / StartOS) is untouched and keeps the system Tor.
+  All failures fail soft (logged to `data/tor/service.log`) and leave the app working against any
+  manually-configured proxy. +9 tests (200). *(Live download/bootstrap validated on a networked
+  desktop; mocked in tests.)*
+
 ## Unreleased — native desktop window (no more Ctrl+C to quit)
 
 - **[P2] Unprofessional exit.** The Windows launch left a console you had to Ctrl+C. `run.bat`

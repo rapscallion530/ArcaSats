@@ -134,11 +134,36 @@ def _log(message: str) -> None:
         pass
 
 
+def _managed_tor_startup() -> None:
+    """Best-effort, in the background: launch ArcaSats's OWN Tor (so a .onion node works with no
+    second app) and note if a newer Tor is available (CVE hygiene). Desktop launch only."""
+    try:
+        from app.services import tor_service
+        tor_service.start()
+        upd = tor_service.check_update()
+        if upd.get("update_available"):
+            tor_service._log(f"update available: {upd.get('installed')} -> {upd.get('latest')}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"managed tor startup failed: {exc!r}")
+
+
 if __name__ == "__main__":
+    _ensure_streams()
     _log("launcher starting")
+    # Turn on the bundled/managed Tor for the desktop app (headless/StartOS leaves this off and
+    # uses the system Tor). Launch it in the background so the window appears without waiting on
+    # Tor's bootstrap; the app falls back to any manually-configured proxy until it's ready.
+    os.environ.setdefault("BTT_MANAGED_TOR", "1")
+    threading.Thread(target=_managed_tor_startup, name="arcasats-tor", daemon=True).start()
     try:
         rc = main()
     except Exception as exc:  # noqa: BLE001 — no console under pythonw; leave a trace before dying
         _log(f"FATAL: {exc!r}")
         raise
+    finally:
+        try:
+            from app.services import tor_service
+            tor_service.stop()
+        except Exception:  # noqa: BLE001
+            pass
     raise SystemExit(rc)

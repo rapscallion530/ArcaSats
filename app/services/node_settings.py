@@ -89,6 +89,14 @@ def save_mempool(session: Session, *, mempool_url: str, mempool_use_tor: bool = 
     return cfg
 
 
+def tor_proxy_or(host: str, port: int) -> tuple[str, int]:
+    """The SOCKS proxy to use for Tor: ArcaSats's OWN bundled/managed Tor when it's up, otherwise
+    the manually configured proxy (host/port). Lets the desktop app reach a .onion with no second
+    app, while a headless/StartOS deployment (managed Tor off) keeps the configured proxy."""
+    from app.services import tor_service
+    return tor_service.active_proxy() or ((host or "127.0.0.1"), port)
+
+
 def build_client(session: Session, timeout: float = 30.0) -> ElectrumClient | None:
     cfg = get_config(session)
     host = cfg.electrum_host.strip()
@@ -96,13 +104,14 @@ def build_client(session: Session, timeout: float = 30.0) -> ElectrumClient | No
         return None
     is_onion = host.endswith(".onion")
     via_tor = cfg.use_tor or is_onion
+    proxy = tor_proxy_or(cfg.tor_host, cfg.tor_port) if via_tor else None
     return ElectrumClient(
         host=host,
         port=cfg.electrum_port,
         use_ssl=cfg.use_ssl and not via_tor,  # Tor already encrypts the hop
         timeout=timeout,
-        proxy_host=cfg.tor_host if via_tor else None,
-        proxy_port=cfg.tor_port if via_tor else None,
+        proxy_host=proxy[0] if proxy else None,
+        proxy_port=proxy[1] if proxy else None,
     )
 
 
@@ -140,10 +149,11 @@ def test_params(*, electrum_host: str, electrum_port: int, use_ssl: bool, use_to
     if not host:
         return TestResult(False, "Enter a server address first.")
     via_tor = use_tor or host.endswith(".onion")
+    proxy = tor_proxy_or(tor_host, tor_port) if via_tor else None
     client = ElectrumClient(
         host=host, port=electrum_port, use_ssl=use_ssl and not via_tor, timeout=timeout,
-        proxy_host=(tor_host or "127.0.0.1") if via_tor else None,
-        proxy_port=tor_port if via_tor else None,
+        proxy_host=proxy[0] if proxy else None,
+        proxy_port=proxy[1] if proxy else None,
     )
     return _test_client(client)
 
@@ -160,12 +170,13 @@ def test_mempool_params(*, mempool_url: str, mempool_use_tor: bool = False,
     from app.services import http_fetch
     host = urlparse(url).hostname or ""
     via = http_fetch.via_tor(host, mempool_use_tor)
+    proxy = tor_proxy_or(tor_host, tor_port) if via else None
     probe = f"{url}/api/v1/historical-price?currency=USD&timestamp={int(time.time()) - 86400}"
     start = time.monotonic()
     try:
         body = http_fetch.get_json(
-            probe, proxy_host=(tor_host or "127.0.0.1") if via else None,
-            proxy_port=tor_port if via else None, timeout=timeout)
+            probe, proxy_host=proxy[0] if proxy else None,
+            proxy_port=proxy[1] if proxy else None, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
         return TestResult(False, f"Connection failed: {exc}")
     latency = int((time.monotonic() - start) * 1000)

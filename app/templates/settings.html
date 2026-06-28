@@ -81,6 +81,17 @@
     <div class="mt-4">{% include "partials/node_status.html" %}</div>
   </section>
 
+  <!-- Bundled Tor (desktop app manages its own Tor so .onion works with no second app) -->
+  <section class="card bg-surface border border-line rounded-card p-6">
+    <h2 class="text-xl text-heading mb-1">Tor (built in)</h2>
+    <p class="text-muted text-sm mb-4">
+      The desktop app runs its <strong>own</strong> Tor in the background, so a <code>.onion</code>
+      node/mempool works without Tor Browser or a separate Tor service. Kept patched via the update
+      button below.
+    </p>
+    <div id="tor-status">{% include "partials/tor_status.html" %}</div>
+  </section>
+
   <!-- Mempool (block explorer + optional price source) -->
   <section class="card bg-surface border border-line rounded-card p-6">
     <h2 class="text-xl text-heading mb-1">Mempool connection</h2>
