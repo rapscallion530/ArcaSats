@@ -40,6 +40,28 @@ def test_active_proxy_none_when_not_running(monkeypatch):
     assert tor_service.active_proxy() is None
 
 
+class _FakeProc:
+    def poll(self):
+        return None    # alive
+
+
+def test_active_proxy_routes_as_soon_as_running(monkeypatch):
+    # The WinError-10061 fix: route through managed Tor while it's up, even mid-bootstrap, instead
+    # of falling back to a (possibly closed) manual proxy.
+    monkeypatch.setattr(tor_service, "_proc", _FakeProc())
+    monkeypatch.setattr(tor_service, "_socks_port", 58089)
+    monkeypatch.setattr(tor_service, "_bootstrapped", False)
+    assert tor_service.active_proxy() == ("127.0.0.1", 58089)
+
+
+def test_is_ready_is_dynamic(monkeypatch):
+    # A slow cold start that outran the initial wait must still flip to ready (not latch False).
+    monkeypatch.setattr(tor_service, "_proc", _FakeProc())
+    monkeypatch.setattr(tor_service, "_bootstrapped", False)
+    monkeypatch.setattr(tor_service, "_log_bootstrapped", lambda: True)
+    assert tor_service.is_ready() is True
+
+
 def test_start_is_noop_when_managed_disabled(monkeypatch):
     monkeypatch.delenv("BTT_MANAGED_TOR", raising=False)
     # Should bail out before touching any binary/download.

@@ -230,23 +230,28 @@ def build_torrc(socks_port: int) -> str:
     )
 
 
-def wait_bootstrap(timeout: float = 60.0) -> bool:
-    """Poll the Tor log until it reports a fully bootstrapped circuit."""
+def _log_bootstrapped() -> bool:
+    try:
+        return "Bootstrapped 100%" in LOG.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def wait_bootstrap(timeout: float = 120.0) -> bool:
+    """Poll the Tor log until it reports a fully bootstrapped circuit. A cold first start (building
+    the consensus from scratch) can take well over a minute, so the timeout is generous."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if _proc is not None and _proc.poll() is not None:
             _log(f"tor exited early (code {_proc.returncode}) during bootstrap")
             return False
-        try:
-            if "Bootstrapped 100%" in LOG.read_text(encoding="utf-8", errors="replace"):
-                return True
-        except OSError:
-            pass
+        if _log_bootstrapped():
+            return True
         time.sleep(0.5)
     return False
 
 
-def start(timeout: float = 60.0) -> bool:
+def start(timeout: float = 120.0) -> bool:
     """Ensure a binary, launch our Tor instance, and wait for bootstrap. No-op (False) if managed
     Tor is disabled, no binary is available, or launch fails — the app then uses the manual proxy."""
     global _proc, _socks_port, _bootstrapped
@@ -284,9 +289,21 @@ def is_running() -> bool:
     return _proc is not None and _proc.poll() is None
 
 
+def is_ready() -> bool:
+    """Whether our Tor has finished bootstrapping. Dynamic (re-reads the log + caches once seen), so
+    a slow cold start that outran the initial wait still flips to ready instead of latching False."""
+    global _bootstrapped
+    if not _bootstrapped and is_running() and _log_bootstrapped():
+        _bootstrapped = True
+    return _bootstrapped and is_running()
+
+
 def active_proxy() -> tuple[str, int] | None:
-    """The managed SOCKS proxy (host, port) when Tor is up and bootstrapped, else None."""
-    if is_running() and _bootstrapped and _socks_port:
+    """The managed SOCKS proxy (host, port) whenever OUR Tor process is up. We route through it as
+    soon as it's running (even during the last % of bootstrap) so the app never falls back to a
+    possibly-dead manual proxy (e.g. a closed Tor Browser's 9150) — which was the WinError-10061
+    cause. Returns None only when managed Tor isn't running (headless/StartOS use the manual proxy)."""
+    if is_running() and _socks_port:
         return ("127.0.0.1", _socks_port)
     return None
 
@@ -332,7 +349,7 @@ def status() -> dict:
     return {
         "enabled": managed_enabled(),
         "running": is_running(),
-        "bootstrapped": _bootstrapped,
+        "bootstrapped": is_ready(),
         "socks_port": _socks_port,
         "version": installed_version(),
     }

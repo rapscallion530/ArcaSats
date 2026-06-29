@@ -22,8 +22,15 @@ Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2
 - **Gating:** managed Tor runs only on the desktop launch (`BTT_MANAGED_TOR`, set by `desktop.py`).
   The headless `uvicorn app.main:app` path (server / StartOS) is untouched and keeps the system Tor.
   All failures fail soft (logged to `data/tor/service.log`) and leave the app working against any
-  manually-configured proxy. +9 tests (200). *(Live download/bootstrap validated on a networked
-  desktop; mocked in tests.)*
+  manually-configured proxy. *(Live download/bootstrap validated on a networked desktop; mocked in
+  tests.)*
+- **[P0 follow-up] `WinError 10061` on a `.onion` test.** A cold first bootstrap can take >60s
+  (building the consensus from scratch), so the initial wait timed out and **latched
+  `bootstrapped=False`** — `active_proxy()` then returned `None` forever and the app fell back to a
+  *closed* manual proxy (Tor Browser's 9150) → connection refused, even though Tor reached 100% a
+  moment later. Fixed: route through managed Tor **as soon as its process is up** (never fall back
+  to a possibly-dead manual port), make readiness **dynamic** (re-read the log instead of a one-shot
+  latch), and raise the cold-start timeout to 120s. (+2 tests, 202.)
 
 ## Unreleased — native desktop window (no more Ctrl+C to quit)
 
