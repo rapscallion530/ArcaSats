@@ -5,6 +5,16 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — account label → KYC-status dropdown
+
+- The account **"Label (optional)"** free-text field is now a **"KYC Status"** dropdown with two
+  choices, **KYC / Non-KYC** (it always drove the KYC cost-basis logic; free text was error-prone).
+  Add + edit forms use the dropdown (edit preselects the current value), and the note field invites
+  the descriptive text labels used to hold. Migration `0007` normalizes existing values and
+  **moves any custom free-text label into the account's note** (`accounts.split_kyc_label`), so
+  nothing is lost. ("KYC" stays KYC; recognized non-KYC spellings normalize; anything else →
+  Non-KYC with the original kept in the note.)
+
 ## Unreleased — single-instance guard + live Tor status
 
 - **Reopening could leave Tor "not running."** Launching ArcaSats again while one was still alive

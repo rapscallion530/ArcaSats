@@ -33,6 +33,25 @@ class AccountSummary:
 
 
 _DISPOSAL_PRIORITIES = ("none", "non_kyc_first", "kyc_first")
+_NON_KYC_VARIANTS = ("non-kyc", "non kyc", "nonkyc", "non_kyc")
+
+
+def split_kyc_label(label: str, note: str) -> tuple[str, str]:
+    """Normalize a legacy free-text account label into a KYC / non-KYC value, relocating any custom
+    text into the note. The label field is now a KYC-status dropdown, so: "KYC" stays "KYC";
+    recognized non-KYC spellings normalize to "non-KYC"; blank stays blank; anything else (a custom
+    label like "Coinbase main") becomes "non-KYC" (its prior effective class) with the original
+    preserved in the note. Returns (label_kind, note)."""
+    lk = (label or "").strip()
+    note = note or ""
+    low = lk.lower()
+    if low == "kyc":
+        return "KYC", note
+    if low in _NON_KYC_VARIANTS:
+        return "non-KYC", note
+    if lk == "":
+        return "", note
+    return "non-KYC", (note + "\n" if note else "") + f"Label: {lk}"
 
 
 def create_account(session: Session, name: str, label_kind: str = "", note: str = "",
