@@ -180,6 +180,32 @@ def list_transactions(session: Session, account_id: int) -> list[Transaction]:
     )
 
 
+def list_all(session: Session, *, account_id: int | None = None, kind: str | None = None,
+             year: int | None = None) -> list[Transaction]:
+    """Every transaction across ALL accounts/wallets (newest first) for the master ledger, with
+    account + wallet eager-loaded. Optional filters by account, kind, and calendar year."""
+    from sqlalchemy.orm import joinedload
+    stmt = (
+        select(Transaction)
+        .options(joinedload(Transaction.account), joinedload(Transaction.wallet))
+        .order_by(Transaction.timestamp.desc(), Transaction.id.desc())
+    )
+    if account_id:
+        stmt = stmt.where(Transaction.account_id == account_id)
+    if kind:
+        stmt = stmt.where(Transaction.kind == kind)
+    rows = list(session.scalars(stmt))
+    if year:
+        rows = [t for t in rows if t.timestamp and t.timestamp.year == year]
+    return rows
+
+
+def all_years(session: Session) -> list[int]:
+    """Distinct calendar years present across all transactions (descending)."""
+    rows = session.scalars(select(Transaction.timestamp)).all()
+    return sorted({t.year for t in rows if t}, reverse=True)
+
+
 def delete_transaction(session: Session, tx_id: int) -> bool:
     tx = session.get(Transaction, tx_id)
     if tx is None:

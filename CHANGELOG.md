@@ -5,6 +5,16 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — master ledger (all accounts/wallets in one view)
+
+- New **Ledger** page (`/ledger`, in the nav): every transaction across **all accounts and
+  wallets** in one chronological table (Account / Wallet / Type / BTC / USD / KYC / counterparty +
+  explorer link), with filters (account, type, year) and **CSV export** (`/ledger.csv`). Read-only
+  — `transactions.list_all()` eager-loads account+wallet (no N+1; renders 300+ txs fine). Cost
+  basis and the 8949/Schedule D stay **per-account** (Rev. Proc. 2024-28); this is a unified
+  browse/audit view, not a re-pooled lot engine. (A combined per-year tax report that *sums*
+  per-account results is a sensible next step.)
+
 ## Unreleased — account label → KYC-status dropdown
 
 - The account **"Label (optional)"** free-text field is now a **"KYC Status"** dropdown with two

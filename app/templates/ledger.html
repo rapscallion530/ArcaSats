@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Ledger · ArcaSats{% endblock %}
+
+{% block content %}
+<div class="max-w-[1100px] mx-auto px-5 py-10 space-y-6">
+  <div class="flex items-baseline justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-2xl text-heading">Master ledger</h1>
+      <p class="text-muted text-sm mt-1">Every transaction across all accounts and wallets.
+        Cost basis &amp; tax stay per-account; this is a unified view.</p>
+    </div>
+    <a class="text-sm text-muted hover:text-heading border border-line rounded-[8px] px-3 py-1.5"
+       href="/ledger.csv?account_id={{ sel_account or '' }}&kind={{ sel_kind or '' }}&year={{ sel_year or '' }}">Export CSV</a>
+  </div>
+
+  <!-- Filters -->
+  <form method="get" action="/ledger" class="card bg-surface border border-line rounded-card p-4 grid sm:grid-cols-4 gap-3 items-end">
+    <label class="text-xs"><span class="text-muted">Account</span>
+      <select name="account_id" onchange="this.form.submit()" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        <option value="">All accounts</option>
+        {% for a in accounts %}<option value="{{ a.id }}" {% if sel_account == a.id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select></label>
+    <label class="text-xs"><span class="text-muted">Type</span>
+      <select name="kind" onchange="this.form.submit()" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        <option value="">All types</option>
+        {% for k in kinds %}<option value="{{ k }}" {% if sel_kind == k %}selected{% endif %}>{{ k.replace('_', ' ')|title }}</option>{% endfor %}
+      </select></label>
+    <label class="text-xs"><span class="text-muted">Year</span>
+      <select name="year" onchange="this.form.submit()" class="mt-1 w-full rounded-[6px] border border-line bg-inputbg px-2 py-1.5 text-ink focus:outline-none focus:border-accent">
+        <option value="">All years</option>
+        {% for y in years %}<option value="{{ y }}" {% if sel_year == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+      </select></label>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="px-3 py-1.5 rounded-[8px] bg-btnbg text-btnink text-sm font-medium hover:bg-btnbghover">Apply</button>
+      <a href="/ledger" class="text-sm text-muted hover:text-heading">Clear</a>
+    </div>
+  </form>
+
+  {% if txs %}
+  <div class="overflow-x-auto card bg-surface border border-line rounded-card">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-muted border-b border-line">
+          <th class="px-4 py-3 font-medium whitespace-nowrap">Date (UTC)</th>
+          <th class="px-4 py-3 font-medium">Account</th>
+          <th class="px-4 py-3 font-medium">Wallet</th>
+          <th class="px-4 py-3 font-medium">Type</th>
+          <th class="px-4 py-3 font-medium text-right"><span class="unit">BTC</span></th>
+          <th class="px-4 py-3 font-medium text-right">USD value</th>
+          <th class="px-4 py-3 font-medium">KYC</th>
+          <th class="px-4 py-3 font-medium">Counterparty</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in txs %}
+        <tr class="border-b border-line/60 last:border-0">
+          <td class="px-4 py-3 whitespace-nowrap tabular-nums">{{ t.timestamp.strftime('%Y-%m-%d %H:%M') if t.timestamp else '—' }}</td>
+          <td class="px-4 py-3"><a class="hover:text-heading text-headingalt" href="/accounts/{{ t.account_id }}">{{ t.account.name if t.account else '—' }}</a></td>
+          <td class="px-4 py-3 text-muted">{{ t.wallet.label if t.wallet else '—' }}</td>
+          <td class="px-4 py-3">
+            {% set color = "text-gain" if t.kind in ("buy", "income", "transfer_in") else "text-loss" %}
+            <span class="{{ color }}">{{ t.kind.replace('_', ' ')|title }}</span>
+            {% if t.txid and mempool_url %}
+            <a class="text-muted hover:text-heading text-xs ml-1" target="_blank" rel="noopener"
+               href="{{ mempool_url }}/tx/{{ t.txid }}" title="View on your block explorer">&#8599;</a>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-right tabular-nums">{{ t.amount_sats|btcamt }}</td>
+          <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ t.usd_value|usd }}</td>
+          <td class="px-4 py-3"><span class="text-xs px-1.5 py-0.5 rounded-full {{ 'bg-tagbg text-tagink' if (t.kyc_origin or '')|lower == 'kyc' else 'bg-surfaceblue text-headingalt' }}">{{ t.kyc_origin or '—' }}</span></td>
+          <td class="px-4 py-3 text-muted">{{ t.counterparty or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-xs text-muted">{{ txs|length }} transaction(s).</p>
+  {% else %}
+  <div class="card bg-surface border border-dashed border-line rounded-card p-8 text-center text-muted">
+    No transactions match these filters.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
