@@ -5,6 +5,19 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — single-instance guard + live Tor status
+
+- **Reopening could leave Tor "not running."** Launching ArcaSats again while one was still alive
+  (or with an orphaned instance lingering) started a *second* server + *second* Tor that collided
+  on the port and on Tor's data-directory lock — the new Tor couldn't even rotate its log
+  (`PermissionError … used by another process`) and bailed. Now `desktop.py` writes a
+  `data/desktop.lock` with its URL; a second launch that finds a **healthy** instance just opens a
+  window onto it and exits (no collision), and a stale lock is ignored. The Tor log cleanup is also
+  non-fatal.
+- **Live status.** The "Tor (built in)" card now auto-refreshes (`GET /settings/tor/status`,
+  polling only while starting) so it shows **Starting… → Running** on its own instead of a stale
+  snapshot. (+4 tests, 204.)
+
 ## Unreleased — bundled, self-managing Tor (turnkey .onion)
 
 - **Reach a `.onion` node with no second app.** Previously you had to keep **Tor Browser** open so

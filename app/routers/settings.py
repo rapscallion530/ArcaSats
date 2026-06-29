@@ -110,6 +110,13 @@ async def llm_models(request: Request, provider: str = Form("ollama"), base_url:
 
 
 # --- bundled Tor -------------------------------------------------------------
+@router.get("/settings/tor/status", response_class=HTMLResponse)
+async def tor_status_partial(request: Request, session: Session = Depends(get_session)):
+    # Cheap local status (no network) — the card polls this until Tor is up so it goes
+    # "Starting… -> Running" on its own.
+    return templates.TemplateResponse(request, "partials/tor_status.html", {"tor": tor_service.status()})
+
+
 @router.post("/settings/tor/check", response_class=HTMLResponse)
 async def tor_check(request: Request, session: Session = Depends(get_session)):
     return templates.TemplateResponse(request, "partials/tor_status.html",

@@ -51,6 +51,18 @@ def test_main_falls_back_to_browser_when_window_fails(monkeypatch):
     assert fake.should_exit is True
 
 
+def test_existing_instance_none_without_lock(monkeypatch, tmp_path):
+    monkeypatch.setattr(desktop, "_lock_path", lambda: str(tmp_path / "desktop.lock"))
+    assert desktop.existing_instance_url() is None
+
+
+def test_lock_write_then_stale_is_ignored(monkeypatch, tmp_path):
+    # A lock pointing at a port nobody is serving is treated as stale (so we start fresh).
+    monkeypatch.setattr(desktop, "_lock_path", lambda: str(tmp_path / "desktop.lock"))
+    desktop._write_lock("http://127.0.0.1:65530")
+    assert desktop.existing_instance_url() is None
+
+
 def test_main_falls_back_when_window_returns_immediately(monkeypatch):
     # The actual reported bug: webview.start() returns at once WITHOUT raising (window never shows).
     # Must not silently exit — open a browser tab instead.

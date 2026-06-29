@@ -37,3 +37,8 @@
             hx-confirm="Download the latest Tor and verify it? (~10 MB)">Update Tor now</button>
     <span class="htmx-indicator text-xs text-muted">working… (downloads can take a moment)</span>
   </div>
+
+  {% if tor and tor.enabled and not tor.bootstrapped %}
+  {# Auto-refresh while Tor is still starting; the next render drops this poller once it's up. #}
+  <div hx-get="/settings/tor/status" hx-trigger="load delay:3s" hx-target="#tor-status" hx-swap="innerHTML"></div>
+  {% endif %}

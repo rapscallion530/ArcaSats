@@ -267,8 +267,11 @@ def start(timeout: float = 120.0) -> bool:
         DATA_SUBDIR.mkdir(parents=True, exist_ok=True)
         port = _free_port()
         TORRC.write_text(build_torrc(port), encoding="utf-8")
-        if LOG.exists():
-            LOG.unlink()
+        try:
+            if LOG.exists():
+                LOG.unlink()   # start fresh so wait_bootstrap reads THIS run's log
+        except OSError:
+            pass               # e.g. another (orphan) tor holds it open — don't abort the launch
         flags = subprocess.CREATE_NO_WINDOW if _WINDOWS else 0  # type: ignore[attr-defined]
         _proc = subprocess.Popen([binary, "-f", str(TORRC)],  # noqa: S603
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

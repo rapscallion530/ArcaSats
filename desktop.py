@@ -81,7 +81,7 @@ def _open_native_window(url: str) -> None:
     webview.start()
 
 
-def main(run_window=_open_native_window, min_session_s: float = 3.0) -> int:
+def main(run_window=_open_native_window, min_session_s: float = 3.0, on_started=None) -> int:
     """Launch the server + native window. `run_window` is injected for tests; normally it blocks
     until the user closes the window, after which we stop the server and exit.
 
@@ -96,6 +96,11 @@ def main(run_window=_open_native_window, min_session_s: float = 3.0) -> int:
     server, thread = _start_server(port)
     url = f"http://{HOST}:{port}"
     _log(f"server started at {url} (started={server.started}); opening native window")
+    if on_started:
+        try:
+            on_started(url)
+        except Exception:  # noqa: BLE001
+            pass
 
     error = None
     began = time.monotonic()
@@ -134,6 +139,45 @@ def _log(message: str) -> None:
         pass
 
 
+def _lock_path() -> str:
+    from app.config import DATA_DIR
+    return os.path.join(DATA_DIR, "desktop.lock")
+
+
+def existing_instance_url() -> str | None:
+    """If another ArcaSats desktop instance is already serving, return its URL (else None). Lets a
+    second launch reuse it instead of starting a colliding second server + second Tor (which fight
+    over the port and Tor's data-directory lock)."""
+    try:
+        with open(_lock_path(), encoding="utf-8") as fh:
+            url = fh.read().strip()
+    except OSError:
+        return None
+    if not url:
+        return None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url + "/health", timeout=2):  # noqa: S310 (loopback)
+            return url
+    except Exception:  # noqa: BLE001 — unreachable => stale lock, ignore
+        return None
+
+
+def _write_lock(url: str) -> None:
+    try:
+        with open(_lock_path(), "w", encoding="utf-8") as fh:
+            fh.write(url)
+    except OSError:
+        pass
+
+
+def _clear_lock() -> None:
+    try:
+        os.remove(_lock_path())
+    except OSError:
+        pass
+
+
 def _managed_tor_startup() -> None:
     """Best-effort, in the background: launch ArcaSats's OWN Tor (so a .onion node works with no
     second app) and note if a newer Tor is available (CVE hygiene). Desktop launch only."""
@@ -150,13 +194,25 @@ def _managed_tor_startup() -> None:
 if __name__ == "__main__":
     _ensure_streams()
     _log("launcher starting")
+    # Single instance: if one's already running, just show a window on it and exit — don't start a
+    # second server/Tor that would collide on the port and Tor's data-dir lock.
+    _existing = existing_instance_url()
+    if _existing:
+        _log(f"another instance already running at {_existing}; opening a window to it")
+        try:
+            _open_native_window(_existing)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"could not open window to existing instance ({exc!r}); using browser")
+            import webbrowser
+            webbrowser.open(_existing)
+        raise SystemExit(0)
     # Turn on the bundled/managed Tor for the desktop app (headless/StartOS leaves this off and
     # uses the system Tor). Launch it in the background so the window appears without waiting on
     # Tor's bootstrap; the app falls back to any manually-configured proxy until it's ready.
     os.environ.setdefault("BTT_MANAGED_TOR", "1")
     threading.Thread(target=_managed_tor_startup, name="arcasats-tor", daemon=True).start()
     try:
-        rc = main()
+        rc = main(on_started=_write_lock)
     except Exception as exc:  # noqa: BLE001 — no console under pythonw; leave a trace before dying
         _log(f"FATAL: {exc!r}")
         raise
@@ -166,4 +222,5 @@ if __name__ == "__main__":
             tor_service.stop()
         except Exception:  # noqa: BLE001
             pass
+        _clear_lock()
     raise SystemExit(rc)
