@@ -19,21 +19,30 @@ from app.templating import templates
 router = APIRouter()
 
 
-def _filtered(session: Session, account_id: int | None, kind: str | None, year: int | None):
-    kind = kind if kind in TxKind.ALL else None
-    return tx_svc.list_all(session, account_id=account_id, kind=kind, year=year)
+def _int_or_none(value: str | None) -> int | None:
+    """Coerce a query value to int, treating ""/None/non-numeric (the 'All' options) as no filter.
+    The filter <select>s submit empty strings for 'All …', which an `int` param would 422 on."""
+    value = (value or "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def _filter(session: Session, account_id, kind, year):
+    aid = _int_or_none(account_id)
+    yr = _int_or_none(year)
+    knd = kind if kind in TxKind.ALL else None
+    return tx_svc.list_all(session, account_id=aid, kind=knd, year=yr), aid, knd, yr
 
 
 @router.get("/ledger", response_class=HTMLResponse)
-async def ledger(request: Request, account_id: int | None = None, kind: str | None = None,
-                 year: int | None = None, session: Session = Depends(get_session)):
-    txs = _filtered(session, account_id, kind, year)
+async def ledger(request: Request, account_id: str | None = None, kind: str | None = None,
+                 year: str | None = None, session: Session = Depends(get_session)):
+    txs, aid, knd, yr = _filter(session, account_id, kind, year)
     return templates.TemplateResponse(request, "ledger.html", {
         "txs": txs,
         "accounts": accounts_svc.list_accounts(session),
         "kinds": TxKind.ALL,
         "years": tx_svc.all_years(session),
-        "sel_account": account_id, "sel_kind": kind, "sel_year": year,
+        "sel_account": aid, "sel_kind": knd, "sel_year": yr,
         "mempool_url": accounts_svc_mempool(session),
     })
 
@@ -48,9 +57,9 @@ def accounts_svc_mempool(session: Session) -> str:
 
 
 @router.get("/ledger.csv", response_class=PlainTextResponse)
-async def ledger_csv(request: Request, account_id: int | None = None, kind: str | None = None,
-                     year: int | None = None, session: Session = Depends(get_session)):
-    txs = _filtered(session, account_id, kind, year)
+async def ledger_csv(request: Request, account_id: str | None = None, kind: str | None = None,
+                     year: str | None = None, session: Session = Depends(get_session)):
+    txs, _aid, _knd, _yr = _filter(session, account_id, kind, year)
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Date (UTC)", "Account", "Wallet", "Type", "BTC", "USD value", "KYC",

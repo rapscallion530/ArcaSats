@@ -34,6 +34,15 @@ def test_ledger_csv_has_header_and_rows(client):
     assert "LedgerCsv" in r.text
 
 
+def test_ledger_empty_filters_do_not_422(client):
+    # The onchange form submits empty strings for the "All …" options alongside a real pick;
+    # empty values must be treated as no filter, not rejected as a bad int.
+    a = _seed(client, "EmptyFilt", TxKind.BUY, dt.datetime(2024, 6, 6), 5_000)
+    assert client.get(f"/ledger?account_id={a}&kind=&year=").status_code == 200   # pick acct, rest "All"
+    assert client.get("/ledger?account_id=&kind=&year=").status_code == 200       # all "All"
+    assert client.get("/ledger.csv?account_id=&kind=&year=").status_code == 200
+
+
 def test_ledger_csv_filters_by_account(client):
     a = _seed(client, "OnlyA", TxKind.BUY, dt.datetime(2024, 4, 4), 1_000)
     _seed(client, "OnlyB", TxKind.SELL, dt.datetime(2024, 4, 5), 2_000)

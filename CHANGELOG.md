@@ -14,6 +14,10 @@ Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2
   basis and the 8949/Schedule D stay **per-account** (Rev. Proc. 2024-28); this is a unified
   browse/audit view, not a re-pooled lot engine. (A combined per-year tax report that *sums*
   per-account results is a sensible next step.)
+- **[P1] Ledger filters 422'd.** The filter `<select>`s submit empty strings for the "All …"
+  options, but `account_id`/`year` were typed `int`, so any pick that left another filter on "All"
+  (which the onchange-submit always does) was rejected. Empty values are now coerced to "no
+  filter." (+1 test.)
 
 ## Unreleased — account label → KYC-status dropdown
 
