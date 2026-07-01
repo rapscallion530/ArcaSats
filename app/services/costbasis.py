@@ -294,7 +294,7 @@ def _carried_fragment_lots(tx: Transaction) -> list[Lot] | None:
 
 def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             method: str = "fifo", account_internal_within: set[str] | None = None,
-            priority: str = "none") -> CostBasisResult:
+            priority: str = "none", account_is_kyc: bool = False) -> CostBasisResult:
     """Run the lot engine over `txs`.
 
     `account_internal_within` is the set of txids that are internal moves between wallets of
@@ -307,6 +307,11 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
     `priority` is the account's KYC disposal preference (none/non_kyc_first/kyc_first). With the
     default "none" the engine is byte-identical to before, including the HIFO max-heap fast path;
     a KYC priority falls back to a linear class-aware selection (opt-in).
+
+    `account_is_kyc`: when the destination account is KYC, every lot HELD here is KYC — coins that
+    enter a KYC wallet are tainted KYC (a one-way ratchet: non-KYC -> KYC on entry; KYC never
+    reverts), matching the conservative `_merge_kyc` stance. So a non-KYC coin transferred into a
+    KYC account becomes a KYC lot for holdings/realized-by-KYC reporting.
     """
     res = CostBasisResult()
     lots: list[Lot] = []
@@ -344,6 +349,8 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
             frag_lots = _carried_fragment_lots(tx)
             if frag_lots is not None:
                 for lot in frag_lots:
+                    if account_is_kyc:
+                        lot.kyc_origin = "KYC"   # coins entering a KYC wallet are tainted KYC
                     lots.append(lot)
                     if use_heap:
                         rate = (lot.basis_usd / lot.sats) if lot.sats else Decimal("0")
@@ -367,8 +374,8 @@ def compute(txs: list[Transaction], internal_txids: set[str] | None = None,
                     # acquired_at (a custodian-provided acquisition date on a transferred-in coin)
                     # back-dates the lot's holding-period origin; else the event time.
                     lot = Lot(acquired=getattr(tx, "acquired_at", None) or tx.timestamp,
-                              sats=tx.amount_sats, basis_usd=basis,
-                              source=tx.source, kyc_origin=tx.kyc_origin or "")
+                              sats=tx.amount_sats, basis_usd=basis, source=tx.source,
+                              kyc_origin=("KYC" if account_is_kyc else (tx.kyc_origin or "")))
                     lots.append(lot)
                     if use_heap:
                         rate = (basis / tx.amount_sats) if tx.amount_sats else Decimal("0")
@@ -502,10 +509,16 @@ def _account_internal_within(txs: list[Transaction], internal: set[str]) -> set[
     return here_out & here_in & internal
 
 
+def _account_is_kyc(session: Session, account_id: int) -> bool:
+    acct = session.get(Account, account_id)
+    return _is_kyc(acct.label_kind) if acct else False
+
+
 def compute_account(session: Session, account_id: int) -> CostBasisResult:
     return compute(tx_svc.list_transactions(session, account_id), internal_txids(session),
                    method=_account_method(session, account_id),
-                   priority=_account_priority(session, account_id))
+                   priority=_account_priority(session, account_id),
+                   account_is_kyc=_account_is_kyc(session, account_id))
 
 
 def compute_wallet(session: Session, account_id: int, wallet_id: int | None) -> CostBasisResult:
@@ -519,7 +532,8 @@ def compute_wallet(session: Session, account_id: int, wallet_id: int | None) -> 
     wtxs = [t for t in all_txs if t.wallet_id == wallet_id]
     return compute(wtxs, internal, method=_account_method(session, account_id),
                    account_internal_within=account_internal,
-                   priority=_account_priority(session, account_id))
+                   priority=_account_priority(session, account_id),
+                   account_is_kyc=_account_is_kyc(session, account_id))
 
 
 def compute_account_breakdown(
@@ -534,14 +548,16 @@ def compute_account_breakdown(
         internal = internal_txids(session)
     method = _account_method(session, account_id)
     priority = _account_priority(session, account_id)
+    is_kyc = _account_is_kyc(session, account_id)
     account_internal = _account_internal_within(txs, internal)
 
     account_res = compute(txs, internal, method=method, account_internal_within=account_internal,
-                          priority=priority)
+                          priority=priority, account_is_kyc=is_kyc)
     wallet_ids = sorted({t.wallet_id for t in txs}, key=lambda w: (w is None, w or 0))
     per_wallet = [
         (wid, compute([t for t in txs if t.wallet_id == wid], internal, method=method,
-                      account_internal_within=account_internal, priority=priority))
+                      account_internal_within=account_internal, priority=priority,
+                      account_is_kyc=is_kyc))
         for wid in wallet_ids
     ]
     return account_res, per_wallet

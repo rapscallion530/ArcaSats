@@ -285,3 +285,34 @@ def test_disposal_priority_round_trips_and_applies(client):
     # The edit form should reflect the saved priority.
     assert 'value="non_kyc_first" selected' in client.get(f"/accounts/{aid}/edit-form").text
 
+
+
+def test_non_kyc_coins_tainted_kyc_on_entering_kyc_account(session):
+    # Alpha/Bravo (non-KYC) -> Charlie (KYC): coins that enter a KYC wallet become KYC lots.
+    nk = acc.create_account(session, name="NKsrc", label_kind="non-KYC")
+    k = acc.create_account(session, name="Kdest", label_kind="KYC")
+    txsvc.add_transaction(session, account_id=nk.id, kind=TxKind.BUY, timestamp=dt.datetime(2023, 1, 1),
+                          amount_sats=BTC, fiat_value=Decimal("40000"))
+    txsvc.add_transaction(session, account_id=nk.id, kind=TxKind.SELL, timestamp=dt.datetime(2024, 1, 1),
+                          amount_sats=BTC, txid="TXA", external_id="TXA:out")
+    txsvc.add_transaction(session, account_id=k.id, kind=TxKind.BUY, timestamp=dt.datetime(2024, 1, 1),
+                          amount_sats=BTC, txid="TXA", external_id="TXA:in")
+    costbasis.reconcile_internal_transfers(session)
+    cbk = costbasis.compute_account(session, k.id)
+    assert cbk.holding_sats == BTC
+    assert set(cbk.holding_by_kyc) == {"KYC"}          # non-KYC provenance upgraded to KYC on entry
+
+
+def test_kyc_coins_stay_kyc_in_non_kyc_account(session):
+    # One-way ratchet: KYC coins moved into a non-KYC account stay KYC (never downgraded).
+    k = acc.create_account(session, name="Ksrc", label_kind="KYC")
+    nk = acc.create_account(session, name="NKdest", label_kind="non-KYC")
+    txsvc.add_transaction(session, account_id=k.id, kind=TxKind.BUY, timestamp=dt.datetime(2023, 1, 1),
+                          amount_sats=BTC, fiat_value=Decimal("40000"))
+    txsvc.add_transaction(session, account_id=k.id, kind=TxKind.SELL, timestamp=dt.datetime(2024, 1, 1),
+                          amount_sats=BTC, txid="TXB", external_id="TXB:out")
+    txsvc.add_transaction(session, account_id=nk.id, kind=TxKind.BUY, timestamp=dt.datetime(2024, 1, 1),
+                          amount_sats=BTC, txid="TXB", external_id="TXB:in")
+    costbasis.reconcile_internal_transfers(session)
+    cbnk = costbasis.compute_account(session, nk.id)
+    assert set(cbnk.holding_by_kyc) == {"KYC"}          # preserved, not downgraded to non-KYC

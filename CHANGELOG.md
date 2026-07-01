@@ -5,6 +5,17 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — KYC taint on entering a KYC account
+
+- **Non-KYC coins that enter a KYC account become KYC.** Previously KYC provenance strictly
+  followed the coin (a KYC account holding coins transferred in from a non-KYC wallet still bucketed
+  them as non-KYC). Now every lot **held in a KYC account is KYC** — a one-way ratchet (non-KYC →
+  KYC on entry; KYC never reverts, incl. KYC coins moved into a non-KYC account), matching the
+  conservative `_merge_kyc` stance (once a coin touches KYC, it's KYC). `compute()` takes
+  `account_is_kyc` (from the destination account's label) and tags transfer-in / direct-acquisition
+  lots accordingly; holdings + realized gains bucket by KYC correctly. Verified on the loaded data:
+  coins moved from non-KYC wallets into the KYC "Charlie" account now report as KYC. (+2 tests.)
+
 ## Unreleased — Coinbase destination address captured
 
 - Coinbase's **"Recipient Address"** is now mapped to the transaction's `address` (a Send's
