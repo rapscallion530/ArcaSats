@@ -5,6 +5,16 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — Coinbase destination address captured
+
+- Coinbase's **"Recipient Address"** is now mapped to the transaction's `address` (a Send's
+  destination), not just left in the raw stash. This activates **address-based** CSV→wallet linkage
+  for Coinbase — a withdrawal to one of your own loaded-wallet addresses auto-relabels to a transfer
+  and carries basis/KYC (previously only the txid path was live; an audit of the dummy data showed
+  0/315 txs carried an address). Verified: all 100 rows of a Coinbase export now capture their
+  destination. (Existing Coinbase rows aren't retro-updated — delete + re-import to pick it up.)
+  (+1 test.)
+
 ## Unreleased — master ledger (all accounts/wallets in one view)
 
 - New **Ledger** page (`/ledger`, in the nav): every transaction across **all accounts and

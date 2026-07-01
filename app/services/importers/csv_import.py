@@ -254,6 +254,9 @@ def parse_coinbase(rows: list[dict]) -> list[NormalizedTx]:
             # directly, so don't also pass a separate fee (that would double-count it).
             fiat_value=_usd(_get(r, "total (inclusive of fees and/or spread)", "total", "subtotal")),
             price_usd=_usd(_get(r, "price at transaction", "spot price at transaction", "spot price", "price")),
+            # Destination (a Send's "Recipient Address") — lets a withdrawal auto-link to your own
+            # wallet when it matches one of your addresses (address-based reconciliation).
+            address=_get(r, "recipient address", "recipient", "to address", "destination", "address") or None,
             counterparty="Coinbase",
             note=_get(r, "notes", "note"),
             raw=dict(r),

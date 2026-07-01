@@ -83,6 +83,19 @@ def test_swan_withdrawal_completed_status_is_imported(session):
     assert txs[0].kind == TxKind.SELL and txs[0].txid == "abc123"
 
 
+def test_coinbase_send_captures_recipient_address(session):
+    # Coinbase's "Recipient Address" is now mapped to the tx address so a withdrawal to your own
+    # wallet can auto-link (address-based reconciliation), not just live in the raw stash.
+    a = acc.create_account(session, name="CbAddr")
+    csv = ("ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Price Currency,"
+           "Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),"
+           "Fees and/or Spread,Notes,Sender Address,Recipient Address\n"
+           "x1,2025-01-02 10:00:00 UTC,Send,BTC,-0.01000000,USD,90000,,,,,,bc1q-mycold\n")
+    csv_import.import_csv(session, account_id=a.id, source="coinbase", text=csv)
+    tx = session.scalar(select(Transaction).where(Transaction.account_id == a.id))
+    assert tx.kind == TxKind.SELL and tx.address == "bc1q-mycold"
+
+
 def _aid(name: str) -> int:
     with SessionLocal() as s:
         return s.scalar(select(Account.id).where(Account.name == name))
