@@ -25,3 +25,20 @@ def test_hash160_compose():
     import hashlib
     x = b"\x02" + b"\x11" * 32
     assert hash160(x) == ripemd160(hashlib.sha256(x).digest())
+
+
+def test_testnet_vpub_derives_tb1_addresses():
+    """Testnet path: a vpub derives native-segwit testnet (tb1) addresses. Vector = the public
+    BIP84 test seed re-encoded to testnet (same keys, testnet version bytes). Validated live
+    against blockstream testnet electrum (real history present)."""
+    from app.services.bip32 import derive_addresses, key_kind
+    from app.services.script import b58check_decode, b58check_encode
+    zpub = ("zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868Rv"
+            "UUkgDKf31mGDtKsAYz2oz2AGutZYs")
+    vpub = b58check_encode(bytes.fromhex("045f1cf6") + b58check_decode(zpub)[4:])
+    assert key_kind(vpub) == ("p2wpkh", "testnet")
+    assert [a for _, a in derive_addresses(vpub, change=0, count=3)] == [
+        "tb1qcr8te4kr609gcawutmrza0j4xv80jy8zmfp6l0",
+        "tb1qnjg0jd8228aq7egyzacy8cys3knf9xvrn9d67m",
+        "tb1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rz283u3",
+    ]

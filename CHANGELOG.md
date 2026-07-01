@@ -5,6 +5,18 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — live-validated on-chain sync (mainnet + testnet public data)
+
+- Exercised the xpub pipeline end-to-end against **blockstream's public Electrum** with the public
+  BIP84 test vector: derivation + gap scan + `get_history` work on **mainnet** (176 tx on the test
+  wallet's first address) and **testnet** (re-encoded to a `vpub` → `tb1…`; 326 tx). Added a
+  permanent offline **testnet-derivation** test (there was none).
+- **Finding (documented, not yet fixed):** the scanner requires
+  `blockchain.transaction.get(verbose=True)`; blockstream's electrs returns *"verbose transactions
+  are currently unsupported,"* so the scanner needs a **raw-tx parser fallback** to be universal
+  (self-hosted electrs/Fulcrum builds generally support verbose). See `docs/code-review.md` →
+  On-chain sync.
+
 ## Unreleased — KYC taint on entering a KYC account
 
 - **Non-KYC coins that enter a KYC account become KYC.** Previously KYC provenance strictly
