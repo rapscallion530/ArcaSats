@@ -161,6 +161,25 @@ def address_to_scriptpubkey(addr: str) -> bytes:
     raise ValueError(f"unsupported address version: {version}")
 
 
+def scriptpubkey_to_address(spk: bytes, network: str = "mainnet") -> str | None:
+    """Reverse of address_to_scriptpubkey: decode a scriptPubKey back to an address (or None for
+    non-standard/unspendable outputs like OP_RETURN). Used to parse RAW transactions from Electrum
+    servers that don't support verbose `blockchain.transaction.get`. Handles p2pkh, p2sh, and
+    v0/v1+ witness (p2wpkh/p2wsh/p2tr)."""
+    testnet = network == "testnet"
+    n = len(spk)
+    if n == 25 and spk[0:3] == b"\x76\xa9\x14" and spk[23:25] == b"\x88\xac":  # p2pkh
+        return b58check_encode(bytes([0x6F if testnet else 0x00]) + spk[3:23])
+    if n == 23 and spk[0:2] == b"\xa9\x14" and spk[22] == 0x87:                # p2sh
+        return b58check_encode(bytes([0xC4 if testnet else 0x05]) + spk[2:22])
+    if n >= 4 and (spk[0] == 0x00 or 0x51 <= spk[0] <= 0x60):                  # witness v0..16
+        witver = 0 if spk[0] == 0x00 else spk[0] - 0x50
+        plen = spk[1]
+        if plen == n - 2 and 2 <= plen <= 40 and not (witver == 0 and plen not in (20, 32)):
+            return segwit_encode("tb" if testnet else "bc", witver, spk[2:])
+    return None
+
+
 def scripthash(addr: str) -> str:
     """Electrum scripthash: sha256(scriptPubKey), byte-reversed, hex."""
     spk = address_to_scriptpubkey(addr)

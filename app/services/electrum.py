@@ -24,6 +24,7 @@ _MAX_RESPONSE = 32 * 1024 * 1024  # cap a single JSON-RPC response so a buggy/ho
 class ElectrumLike(Protocol):
     def get_history(self, scripthash: str) -> list[dict]: ...
     def get_transaction(self, txid: str, verbose: bool = True) -> dict: ...
+    def block_header(self, height: int) -> str: ...
 
 
 class ElectrumError(RuntimeError):
@@ -150,6 +151,11 @@ class ElectrumClient:
 
     def get_transaction(self, txid: str, verbose: bool = True) -> dict:
         return self._call("blockchain.transaction.get", [txid, verbose])
+
+    def block_header(self, height: int) -> str:
+        """Raw 80-byte block header (hex) at `height`. Used to date transactions when the server
+        can't return verbose txs (raw tx carries no block time); timestamp = bytes[68:72] LE."""
+        return self._call("blockchain.block.header", [height])
 
     def block_height(self) -> int:
         """Current chain tip height (for connection tests / status)."""

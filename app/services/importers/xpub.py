@@ -28,6 +28,7 @@ from app.services import transactions as tx_svc
 from app.services.bip32 import derive_addresses, key_kind
 from app.services.electrum import ElectrumLike
 from app.services.script import scripthash
+from app.services.txparse import parse_raw_tx
 
 # Probe order: native segwit first (most common today), then wrapped, then legacy.
 _SCRIPT_TYPES = ("p2wpkh", "p2sh-p2wpkh", "p2pkh")
@@ -114,8 +115,25 @@ def _blocktime(tx: dict) -> dt.datetime:
     return dt.datetime.now(dt.UTC).replace(tzinfo=None)
 
 
+def _tx_time(client: ElectrumLike, tx: dict, height: int, cache: dict[int, dt.datetime]) -> dt.datetime:
+    """Transaction date. Verbose txs carry blocktime; a RAW-parsed tx doesn't, so date it from the
+    block header at its height (cached per height). Mempool / unknown height falls back to now()."""
+    if tx.get("blocktime") or tx.get("time"):
+        return _blocktime(tx)
+    if height and height > 0:
+        if height not in cache:
+            try:
+                hdr = client.block_header(height)
+                ts = int.from_bytes(bytes.fromhex(hdr)[68:72], "little")
+                cache[height] = dt.datetime.fromtimestamp(ts, dt.UTC).replace(tzinfo=None)
+            except Exception:  # noqa: BLE001 — header unavailable; date unknown
+                cache[height] = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+        return cache[height]
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
 def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
-                    max_per_chain: int, result: ScanResult) -> None:
+                    max_per_chain: int, result: ScanResult, network: str = "mainnet") -> None:
     """Walk each chain with a gap limit using `derive_one(chain, index) -> address`, collect
     the wallet's addresses + touching txids, then derive both the per-output UTXO inventory
     (result.utxos) and each tx's net received-sent (result.txs). Address-type-agnostic — works
@@ -140,11 +158,28 @@ def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
             i += 1
 
     tx_cache: dict[str, dict] = {}
+    header_time: dict[int, dt.datetime] = {}
 
     def get_tx(txid: str) -> dict:
-        if txid not in tx_cache:
-            tx_cache[txid] = client.get_transaction(txid, verbose=True)
-        return tx_cache[txid]
+        """Verbose tx if the server supports it; otherwise fetch the raw hex and parse it locally
+        (some electrs builds — e.g. blockstream's — reject verbose transactions)."""
+        if txid in tx_cache:
+            return tx_cache[txid]
+        try:
+            v = client.get_transaction(txid, verbose=True)
+        except Exception:  # noqa: BLE001 — server may not support verbose; fall back to raw
+            v = None
+        if isinstance(v, dict) and v.get("vout"):
+            tx = v
+        else:
+            raw = v.get("hex") if isinstance(v, dict) else (v if isinstance(v, str) else None)
+            if not isinstance(raw, str):
+                raw = client.get_transaction(txid, verbose=False)
+                if isinstance(raw, dict):
+                    raw = raw.get("hex", "")
+            tx = parse_raw_tx(raw, network)
+        tx_cache[txid] = tx
+        return tx
 
     # Pass 1 — record every output paying one of our addresses as a (provisionally unspent)
     # UTXO, and tally received-per-tx. Building all outputs first means pass 2 can mark spends
@@ -156,7 +191,7 @@ def _scan_addresses(client: ElectrumLike, derive_one, chains, gap_limit: int,
     ts_by_tx: dict[str, dt.datetime] = {}
     for txid, height in txid_height.items():
         tx = get_tx(txid)
-        ts_by_tx[txid] = _blocktime(tx)
+        ts_by_tx[txid] = _tx_time(client, tx, height, header_time)
         for vidx, vout in enumerate(tx.get("vout", [])):
             addr = _vout_address(vout)
             meta = addr_meta.get(addr)
@@ -233,7 +268,8 @@ def scan_xpub(
         def derive_one(chain, i):
             return derive_addresses(xpub, change=chain, count=1, start=i, script_type=script_type)[0][1]
 
-        _scan_addresses(client, derive_one, (0, 1), gap_limit, max_per_chain, result)
+        _scan_addresses(client, derive_one, (0, 1), gap_limit, max_per_chain, result,
+                        network=key_kind(xpub)[1])
     except Exception as exc:  # noqa: BLE001
         result.error = str(exc)
     return result

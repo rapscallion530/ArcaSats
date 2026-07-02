@@ -5,6 +5,16 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — raw-tx parser: xpub sync works on any Electrum server
+
+- The xpub scanner no longer requires verbose transactions. When a server rejects
+  `blockchain.transaction.get(verbose=True)` (e.g. **blockstream's electrs**), it now fetches the
+  **raw tx hex and parses it locally** — new `services/txparse.py` (legacy + segwit) +
+  `script.scriptpubkey_to_address` (reverse of the address→scriptPubKey encoder; p2pkh/p2sh/
+  p2wpkh/p2wsh/p2tr, mainnet + testnet). Raw txs carry no block time, so dates come from the block
+  header at the tx's height (`ElectrumClient.block_header`). Verified live against blockstream on
+  mainnet + testnet — real outputs/values/dates decode correctly. (+5 tests.)
+
 ## Unreleased — live-validated on-chain sync (mainnet + testnet public data)
 
 - Exercised the xpub pipeline end-to-end against **blockstream's public Electrum** with the public

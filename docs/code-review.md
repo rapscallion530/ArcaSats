@@ -48,7 +48,7 @@ the whole instance behind one password (an HMAC-signed unlock cookie). The gate 
 ## Running the checks
 
 ```
-pytest -q                          # 216 tests; crypto vectors (mainnet+testnet), cost-basis, KYC lots, importers,
+pytest -q                          # 221 tests; crypto vectors (mainnet+testnet), raw-tx parse, cost-basis, KYC lots, importers,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)
@@ -97,13 +97,13 @@ These are deliberately deferred and documented, not hidden. Roughly by area:
   plus cached "no data" hours would harden and speed it up.
 
 ### On-chain sync (Electrum)
-- **Verbose-tx requirement.** The xpub scanner (`importers/xpub.py`) fetches transactions with
-  `blockchain.transaction.get(verbose=True)` and has **no raw-tx parser fallback**. Validated live
-  against **blockstream's public electrs**, which answers *"verbose transactions are currently
-  unsupported"* — so the scanner can't parse txs there (derivation + `get_history` work fine; a
-  full mainnet scan of the BIP84 test wallet found 176 tx on addr 0). Most self-hosted electrs/
-  Fulcrum builds support verbose, but a raw-tx (hex) parser would make the scanner universal.
-  (Derivation is verified live on both networks — mainnet `bc1…` and testnet `tb1…`.)
+- **Verbose-tx not required (resolved).** The xpub scanner (`importers/xpub.py`) prefers verbose
+  `blockchain.transaction.get`, but now **falls back to fetching raw tx hex and parsing it locally**
+  (`services/txparse.py` + `script.scriptpubkey_to_address`) for servers that reject verbose (e.g.
+  **blockstream's public electrs** answers *"verbose transactions are currently unsupported"*). Raw
+  txs carry no block time, so dates come from the block header at the tx's height
+  (`ElectrumClient.block_header`). Verified live against blockstream on both networks (mainnet
+  `bc1…`, testnet `tb1…`) — real outputs/values/dates decode correctly.
 
 ### Auth / ops
 - **Optional password lock** has no rate-limiting/lockout (low priority — one local password).
