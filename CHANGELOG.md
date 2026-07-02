@@ -5,6 +5,13 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — flag $0-proceeds disposals (phantom-loss guard)
+
+- The filing-readiness check only flagged taxable transactions with a **`None`** USD value, so a
+  disposal recorded with **exactly `$0.00`** proceeds slipped through — silently producing a
+  full-basis phantom loss. It's now flagged ("N disposal(s) record $0 proceeds — likely a missing
+  sale price"). (+1 test.)
+
 ## Unreleased — raw-tx parser: xpub sync works on any Electrum server
 
 - The xpub scanner no longer requires verbose transactions. When a server rejects

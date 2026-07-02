@@ -83,3 +83,20 @@ def test_8949_routes(client):
     assert "text/csv" in csv.headers["content-type"]
     assert "attachment" in csv.headers["content-disposition"]
     assert "Schedule D" in csv.text
+
+
+def test_zero_proceeds_disposal_is_flagged():
+    import datetime as dt
+    from decimal import Decimal
+    from app.models import Transaction, TxKind
+    from app.services import taxforms
+    from app.services.costbasis import CostBasisResult
+    # A sell recorded with $0 proceeds (not None) -> phantom loss; must be flagged.
+    txs = [Transaction(kind=TxKind.SELL, timestamp=dt.datetime(2024, 7, 4), amount_sats=3_000_000,
+                       fiat_value=Decimal("0"), fiat_source="actual")]
+    msgs = [f.message for f in taxforms.readiness_flags(txs, CostBasisResult())]
+    assert any("$0 proceeds" in m for m in msgs)
+    # A normal-priced sell is NOT flagged for zero proceeds.
+    ok = [Transaction(kind=TxKind.SELL, timestamp=dt.datetime(2024, 7, 4), amount_sats=3_000_000,
+                      fiat_value=Decimal("1800"), fiat_source="actual")]
+    assert not any("$0 proceeds" in f.message for f in taxforms.readiness_flags(ok, CostBasisResult()))

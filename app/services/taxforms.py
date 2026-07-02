@@ -107,6 +107,13 @@ def readiness_flags(txs: list[Transaction], cb: CostBasisResult, *, price_source
     if missing:
         flags.append(ReadinessFlag("warn", f"{missing} taxable transaction(s) have no USD value — "
                      "basis/proceeds may be wrong. Enter the actual price, or fetch prices."))
+    # A disposal recorded with EXACTLY $0 proceeds (not just None) is almost always a missing sale
+    # price — it silently produces a full-basis phantom loss, so surface it too.
+    zero_proceeds = sum(1 for t in txs if t.kind in TxKind.DISPOSALS
+                        and t.fiat_value is not None and t.fiat_value == 0)
+    if zero_proceeds:
+        flags.append(ReadinessFlag("warn", f"{zero_proceeds} disposal(s) record $0 proceeds — likely a "
+                     "missing sale price (produces a phantom loss). Enter the actual proceeds."))
     estimates = sum(1 for t in txs if (t.fiat_source or "") == "estimate")
     if estimates:
         src = f" ({price_source} spot)" if price_source else ""
