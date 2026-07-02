@@ -5,6 +5,16 @@ follow-ups live in [`docs/code-review.md`](docs/code-review.md); this file recor
 
 Severity tags: **P0** correctness/security/privacy · **P1** performance · **P2** best practice.
 
+## Unreleased — combined tax report (all accounts in one 8949)
+
+- New **Combined 8949 / Schedule D** across all accounts (`/tax/combined`, linked from the Tax
+  page): one Form 8949 + Schedule D for a chosen year that **sums each account's per-account
+  disposals** — the correct way to combine under Rev. Proc. 2024-28 (lots are selected *within*
+  each account, never re-pooled across accounts). Shows combined short/long/net + ordinary income,
+  a **by-account** breakdown and a **by-KYC** breakdown, the readiness flags, and a full rows table
+  with an Account column; CSV export (`/tax/combined.csv`). Reuses the per-account engine
+  (`taxforms.build_rows/totals` + new `totals_by_account` / `to_csv_combined`). (+3 tests.)
+
 ## Unreleased — flag $0-proceeds disposals (phantom-loss guard)
 
 - The filing-readiness check only flagged taxable transactions with a **`None`** USD value, so a

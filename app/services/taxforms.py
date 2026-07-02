@@ -29,6 +29,7 @@ class Form8949Row:
     basis: Decimal
     term: str
     kyc_origin: str = ""
+    account: str = ""       # set only for the combined (all-accounts) report
 
     @property
     def gain(self) -> Decimal:
@@ -64,6 +65,23 @@ def totals_by_kyc(rows: list[Form8949Row]) -> dict[str, dict]:
         b["total"] += r.gain
     for b in out.values():
         for k in b:
+            b[k] = b[k].quantize(_CENTS)
+    return out
+
+
+def totals_by_account(rows: list[Form8949Row]) -> dict[str, dict]:
+    """Realized short/long/total gain per source account (for the combined report). Aggregating
+    each account's own disposals is the correct way to combine under Rev. Proc. 2024-28 — the lots
+    were selected WITHIN each account, never re-pooled across accounts."""
+    out: dict[str, dict] = {}
+    for r in rows:
+        b = out.setdefault(r.account or "(unnamed)",
+                           {"short": Decimal("0"), "long": Decimal("0"), "total": Decimal("0"), "count": 0})
+        b[r.term] += r.gain
+        b["total"] += r.gain
+        b["count"] += 1
+    for b in out.values():
+        for k in ("short", "long", "total"):
             b[k] = b[k].quantize(_CENTS)
     return out
 
@@ -158,4 +176,31 @@ def to_csv(rows: list[Form8949Row], account_name: str, year: int | None,
     w.writerow(["Price source", price_source or "(offline / manual values only)"])
     w.writerow(["Disclaimer", "DRAFT 8949-format report — not a filed IRS form. USD values may be "
                 "price-feed estimates rather than actual fills; verify before filing."])
+    return buf.getvalue()
+
+
+def to_csv_combined(rows: list[Form8949Row], year: int | None, *, price_source: str = "") -> str:
+    """One Form 8949 / Schedule D across ALL accounts — the sum of each account's per-account
+    results (correct under Rev. Proc. 2024-28), with a leading Account column."""
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Form 8949 — ALL ACCOUNTS (combined)" + (f" — {year}" if year else "")])
+    w.writerow(["Account", "Part", "Description", "Date acquired", "Date sold", "Proceeds (USD)",
+                "Cost basis (USD)", "Gain/loss (USD)"])
+    for r in rows:
+        part = "I (short-term)" if r.term == "short" else "II (long-term)"
+        w.writerow([r.account, part, r.description, f"{r.acquired:%Y-%m-%d}", f"{r.sold:%Y-%m-%d}",
+                    f"{r.proceeds:.2f}", f"{r.basis:.2f}", f"{r.gain:.2f}"])
+    t = totals(rows)
+    w.writerow([])
+    w.writerow(["", "Schedule D — short-term total", "", "", "", f"{t['short']['proceeds']:.2f}",
+                f"{t['short']['basis']:.2f}", f"{t['short']['gain']:.2f}"])
+    w.writerow(["", "Schedule D — long-term total", "", "", "", f"{t['long']['proceeds']:.2f}",
+                f"{t['long']['basis']:.2f}", f"{t['long']['gain']:.2f}"])
+    w.writerow(["", "Net capital gain/loss", "", "", "", "", "", f"{t['net_gain']:.2f}"])
+    w.writerow([])
+    w.writerow(["Method", "per-account lot cost basis, aggregated (Rev. Proc. 2024-28; lots NOT "
+                "re-pooled across accounts)"])
+    w.writerow(["Price source", price_source or "(offline / manual values only)"])
+    w.writerow(["Disclaimer", "DRAFT 8949-format report — not a filed IRS form. Verify before filing."])
     return buf.getvalue()

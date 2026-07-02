@@ -48,7 +48,7 @@ the whole instance behind one password (an HMAC-signed unlock cookie). The gate 
 ## Running the checks
 
 ```
-pytest -q                          # 222 tests; crypto vectors (mainnet+testnet), raw-tx parse, cost-basis, KYC lots, importers,
+pytest -q                          # 225 tests; crypto vectors (mainnet+testnet), raw-tx parse, cost-basis, KYC lots, importers,
                                    #   IDOR, CSRF, pricing, tz
 python scripts/release_check.py    # release-hygiene gate (no secrets tracked, doc test-count
                                    #   matches collected, vendored assets present)
